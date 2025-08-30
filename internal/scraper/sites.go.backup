@@ -1,0 +1,1520 @@
+package scraper
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/url"
+	"regexp"
+	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+	"movie-data-capture/pkg/logger"
+)
+
+// scrapeJavBus scrapes movie data from JavBus
+func (s *Scraper) scrapeJavBus(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting JavBus scraping for number: %s", number)
+	
+	// Special number mappings (based on Python version)
+	specialMappings := map[string]string{
+		"DV-1649": "DV-1649_2014-07-25",
+		"DV-1195": "DV-1195_2010-10-08",
+		"BKD-003": "BKD-003_2009-09-05",
+	}
+
+	searchNumber := number
+	if mapped, exists := specialMappings[number]; exists {
+		searchNumber = mapped
+		logger.Debug("Using special mapping: %s -> %s", number, mapped)
+	}
+
+	// Try main site first
+	detailURL := fmt.Sprintf("https://www.javbus.com/%s", searchNumber)
+	logger.Debug("Trying main JavBus URL: %s", detailURL)
+	movieData, err := s.scrapeJavBusPage(ctx, detailURL, false)
+	if err == nil {
+		return movieData, nil
+	}
+
+	logger.Debug("Main JavBus site failed: %v, trying mirror sites", err)
+
+	// Try mirror sites
+	mirrorSites := []string{"buscdn.art"}
+	for _, mirror := range mirrorSites {
+		mirrorURL := fmt.Sprintf("https://www.%s/%s", mirror, searchNumber)
+		logger.Debug("Trying mirror site: %s", mirrorURL)
+		movieData, err := s.scrapeJavBusPage(ctx, mirrorURL, false)
+		if err == nil {
+			return movieData, nil
+		}
+	}
+
+	// Try uncensored search as fallback
+	logger.Debug("Trying uncensored JavBus search")
+	uncensoredNumber := strings.ReplaceAll(number, ".", "-")
+	uncensoredURL := fmt.Sprintf("https://www.javbus.red/%s", uncensoredNumber)
+	return s.scrapeJavBusPage(ctx, uncensoredURL, true)
+}
+
+// scrapeJavBusPage scrapes a specific JavBus page
+func (s *Scraper) scrapeJavBusPage(ctx context.Context, url string, uncensored bool) (*MovieData, error) {
+	// Set headers with age verification cookie
+	headers := map[string]string{
+		"Cookie": "existmag=all",
+		"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+		// Don't set Accept-Encoding manually - let Go handle compression automatically
+		"DNT": "1",
+		"Connection": "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, url, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("page not found")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Read the response body to check content
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("FC2 response body length: %d bytes", len(body))
+	if len(body) > 0 {
+		// Log first 500 characters for debugging
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		logger.Debug("FC2 response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	// Debug: check page content
+	pageTitle := doc.Find("title").Text()
+	logger.Debug("JavBus page title: %s", pageTitle)
+	
+	// Check if this is an error page or redirect
+	if strings.Contains(pageTitle, "404") || strings.Contains(pageTitle, "Not Found") {
+		return nil, fmt.Errorf("movie not found (404)")
+	}
+	
+	// Check for age verification or other blocking pages
+	if strings.Contains(pageTitle, "Age Verification") || strings.Contains(pageTitle, "Verification") {
+		return nil, fmt.Errorf("age verification required")
+	}
+
+	// Extract movie data
+	movieData := &MovieData{
+		Website: url,
+		Source:  "javbus",
+	}
+
+	// Extract number from meta keywords
+	if keywords, exists := doc.Find("meta[name='keywords']").Attr("content"); exists {
+		logger.Debug("Found keywords: %s", keywords)
+		parts := strings.Split(keywords, ",")
+		if len(parts) > 0 {
+			movieData.Number = strings.TrimSpace(parts[0])
+			logger.Debug("Extracted number: %s", movieData.Number)
+		}
+	} else {
+		logger.Debug("No keywords meta tag found")
+	}
+
+	// Extract title
+	if title := doc.Find("title").Text(); title != "" {
+		logger.Debug("Found page title: %s", title)
+		// Remove " - JavBus" suffix and extract title part
+		if idx := strings.Index(title, " - JavBus"); idx > 0 {
+			titlePart := title[:idx]
+			logger.Debug("Title part after removing suffix: %s", titlePart)
+			if spaceIdx := strings.Index(titlePart, " "); spaceIdx > 0 {
+				movieData.Title = strings.TrimSpace(titlePart[spaceIdx+1:])
+				logger.Debug("Extracted title: %s", movieData.Title)
+			}
+		}
+	} else {
+		logger.Debug("No title found")
+	}
+
+	// Extract cover image
+	if coverHref, exists := doc.Find("a.bigImage").Attr("href"); exists {
+		if strings.HasPrefix(coverHref, "/") {
+			movieData.Cover = "https://www.javbus.com" + coverHref
+		} else {
+			movieData.Cover = coverHref
+		}
+	}
+
+	// Extract release date and runtime from info section
+	doc.Find("div.container div.row div.col-md-3 p").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		switch i {
+		case 1: // Release date (second p tag)
+			if text != "" {
+				movieData.Release = text
+				movieData.Year = extractYear(text)
+			}
+		case 2: // Runtime (third p tag)
+			if text != "" {
+				// Remove "分鐘" suffix
+				runtime := strings.TrimSuffix(text, "分鐘")
+				runtime = strings.TrimSpace(runtime)
+				movieData.Runtime = runtime
+			}
+		}
+	})
+
+	// Extract studio
+	studioSelector := "span:contains('製作商:')"
+	if uncensored {
+		studioSelector = "span:contains('メーカー:')"
+	}
+	if studio := doc.Find(studioSelector).Parent().Find("a").Text(); studio != "" {
+		movieData.Studio = strings.TrimSpace(studio)
+	}
+
+	// Extract director
+	directorSelector := "span:contains('導演:')"
+	if uncensored {
+		directorSelector = "span:contains('監督:')"
+	}
+	if director := doc.Find(directorSelector).Parent().Find("a").Text(); director != "" {
+		movieData.Director = strings.TrimSpace(director)
+	}
+
+	// Extract series
+	seriesSelector := "span:contains('系列:')"
+	if uncensored {
+		seriesSelector = "span:contains('シリーズ:')"
+	}
+	if series := doc.Find(seriesSelector).Parent().Find("a").Text(); series != "" {
+		movieData.Series = strings.TrimSpace(series)
+	}
+
+	// Extract actors
+	var actors []string
+	var actorPhotos = make(map[string]string)
+	doc.Find("div.star-name").Each(func(i int, s *goquery.Selection) {
+		if actorLink := s.Find("a"); actorLink.Length() > 0 {
+			if actorName, exists := actorLink.Attr("title"); exists && actorName != "" {
+				actors = append(actors, actorName)
+				
+				// Get actor photo
+				if img := s.Parent().Find("a img"); img.Length() > 0 {
+					if photoSrc, exists := img.Attr("src"); exists && !strings.Contains(photoSrc, "nowprinting.gif") {
+						if strings.HasPrefix(photoSrc, "/") {
+							actorPhotos[actorName] = "https://www.javbus.com" + photoSrc
+						} else {
+							actorPhotos[actorName] = photoSrc
+						}
+					}
+				}
+			}
+		}
+	})
+	movieData.ActorList = actors
+	movieData.ActorPhoto = actorPhotos
+
+	// Extract tags from meta keywords (skip first 2 items which are number and title)
+	if keywords, exists := doc.Find("meta[name='keywords']").Attr("content"); exists {
+		parts := strings.Split(keywords, ",")
+		if len(parts) > 2 {
+			var tags []string
+			for i := 2; i < len(parts); i++ {
+				if tag := strings.TrimSpace(parts[i]); tag != "" {
+					tags = append(tags, tag)
+				}
+			}
+			movieData.Tag = tags
+		}
+	}
+
+	// Extract extra fanart (sample images)
+	var extraFanart []string
+	doc.Find("div#sample-waterfall a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			if strings.HasPrefix(href, "/") {
+				extraFanart = append(extraFanart, "https://www.javbus.com"+href)
+			} else {
+				extraFanart = append(extraFanart, href)
+			}
+		}
+	})
+	movieData.Extrafanart = extraFanart
+
+	// Check if uncensored
+	if doc.Find("#navbar ul li.active a[href*='uncensored']").Length() > 0 {
+		movieData.Uncensored = true
+	}
+
+	logger.Debug("Successfully scraped JavBus data for: %s", movieData.Number)
+	return movieData, nil
+}
+
+// scrapeFanza scrapes movie data from Fanza (DMM)
+func (s *Scraper) scrapeFanza(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting Fanza scraping for number: %s", number)
+	
+	// Normalize Fanza search number
+	fanzaSearchNumber := number
+	if strings.HasPrefix(strings.ToLower(fanzaSearchNumber), "h-") {
+		fanzaSearchNumber = strings.Replace(fanzaSearchNumber, "h-", "h_", 1)
+	}
+	
+	// Remove non-alphanumeric characters except underscore
+	re := regexp.MustCompile(`[^0-9a-zA-Z_]`)
+	fanzaSearchNumber = strings.ToLower(re.ReplaceAllString(fanzaSearchNumber, ""))
+	
+	// Try different Fanza URL patterns
+	fanzaURLs := []string{
+		"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=",
+		"https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=",
+		"https://www.dmm.co.jp/digital/anime/-/detail/=/cid=",
+		"https://www.dmm.co.jp/mono/anime/-/detail/=/cid=",
+		"https://www.dmm.co.jp/digital/videoc/-/detail/=/cid=",
+		"https://www.dmm.co.jp/digital/nikkatsu/-/detail/=/cid=",
+		"https://www.dmm.co.jp/rental/-/detail/=/cid=",
+	}
+	
+	for _, baseURL := range fanzaURLs {
+		detailURL := baseURL + fanzaSearchNumber
+		
+		// Add age verification
+		params := url.Values{}
+		params.Add("rurl", detailURL)
+		ageCheckURL := "https://www.dmm.co.jp/age_check/=/declared=yes/?" + params.Encode()
+		
+		logger.Debug("Trying Fanza URL: %s", ageCheckURL)
+		
+		movieData, err := s.scrapeFanzaPage(ctx, ageCheckURL, detailURL)
+		if err == nil {
+			return movieData, nil
+		}
+		logger.Debug("Fanza URL failed: %v", err)
+	}
+	
+	return nil, fmt.Errorf("no valid Fanza page found for number: %s", number)
+}
+
+// scrapeFanzaPage scrapes a specific Fanza page
+func (s *Scraper) scrapeFanzaPage(ctx context.Context, ageCheckURL, originalURL string) (*MovieData, error) {
+	resp, err := s.httpClient.Get(ctx, ageCheckURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	// Read the response body to check content
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("Fanza response body length: %d bytes", len(body))
+	if len(body) > 0 {
+		// Log first 500 characters for debugging
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		logger.Debug("Fanza response preview: %s", preview)
+	}
+	
+	// Check if this is still the age verification page
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, "年齢認証") || strings.Contains(bodyStr, "Age Verification") {
+		return nil, fmt.Errorf("still on age verification page")
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyStr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	// Check if page contains valid content by looking for og:title
+	if doc.Find("meta[property='og:title']").Length() == 0 {
+		return nil, fmt.Errorf("invalid Fanza page - no og:title found")
+	}
+	
+	movieData := &MovieData{
+		Website: originalURL,
+		Source:  "fanza",
+	}
+	
+	// Extract title from og:title
+	if title, exists := doc.Find("meta[property='og:title']").Attr("content"); exists {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	// Extract cover from og:image
+	if cover, exists := doc.Find("meta[property='og:image']").Attr("content"); exists {
+		movieData.Cover = cover
+	}
+	
+	// Extract outline from og:description
+	if outline, exists := doc.Find("meta[property='og:description']").Attr("content"); exists {
+		movieData.Outline = strings.TrimSpace(outline)
+	}
+	
+	// Extract actors
+	var actors []string
+	doc.Find("td:contains('出演者')").Next().Find("span a").Each(func(i int, s *goquery.Selection) {
+		if actor := strings.TrimSpace(s.Text()); actor != "" {
+			actors = append(actors, actor)
+		}
+	})
+	movieData.ActorList = actors
+	
+	// Extract runtime
+	if runtime := doc.Find("td:contains('収録時間')").Next().Text(); runtime != "" {
+		movieData.Runtime = strings.TrimSpace(runtime)
+	}
+	
+	logger.Debug("Successfully scraped Fanza data for: %s", movieData.Title)
+	return movieData, nil
+}
+
+// scrapeXCity scrapes movie data from XCity
+func (s *Scraper) scrapeXCity(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting XCity scraping for number: %s", number)
+	
+	// XCity search requires form submission
+	xcityNumber := strings.ReplaceAll(number, "-", "")
+	searchURL := "https://xcity.jp/main/"
+	
+	// Create form data
+	formData := url.Values{}
+	formData.Set("q", strings.ToLower(xcityNumber))
+	
+	// Convert form data to proper format for POST request
+	headers := map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
+	}
+	
+	resp, err := s.httpClient.Post(ctx, searchURL, strings.NewReader(formData.Encode()), headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search returned status %d", resp.StatusCode)
+	}
+	
+	// Read response body for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("FC2 response body length: %d", len(body))
+	if len(body) > 500 {
+		logger.Debug("FC2 response body preview: %s", string(body[:500]))
+	} else {
+		logger.Debug("FC2 response body preview: %s", string(body))
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	// Find detail page link
+	var detailURL string
+	doc.Find("a[href*='/avod/detail/']").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			if strings.Contains(href, "/avod/detail/") {
+				if strings.HasPrefix(href, "/") {
+					detailURL = "https://xcity.jp" + href
+				} else {
+					detailURL = href
+				}
+				return
+			}
+		}
+	})
+	
+	if detailURL == "" {
+		return nil, fmt.Errorf("no detail page found for number: %s", number)
+	}
+	
+	return s.scrapeXCityPage(ctx, detailURL)
+}
+
+// scrapeXCityPage scrapes a specific XCity detail page
+func (s *Scraper) scrapeXCityPage(ctx context.Context, url string) (*MovieData, error) {
+	resp, err := s.httpClient.Get(ctx, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	// Read the response body to check content
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("FC2 response body length: %d bytes", len(body))
+	if len(body) > 0 {
+		// Log first 500 characters for debugging
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		logger.Debug("FC2 response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: url,
+		Source:  "xcity",
+	}
+	
+	// Extract number
+	if number := doc.Find("#hinban").Text(); number != "" {
+		movieData.Number = strings.TrimSpace(number)
+	}
+	
+	// Extract title
+	if title := doc.Find("#program_detail_title").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	// Extract cover
+	if cover, exists := doc.Find("#avodDetails div.frame p a").Attr("href"); exists {
+		movieData.Cover = cover
+	}
+	
+	// Extract actors
+	var actors []string
+	doc.Find("ul li.credit-links a").Each(func(i int, s *goquery.Selection) {
+		if actor := strings.TrimSpace(s.Text()); actor != "" {
+			actors = append(actors, actor)
+		}
+	})
+	movieData.ActorList = actors
+	
+	// Extract studio
+	if studio := doc.Find("strong:contains('片商')").Parent().Next().Find("a").Text(); studio != "" {
+		movieData.Studio = strings.TrimSpace(studio)
+	}
+	
+	// Extract runtime
+	if runtime := doc.Find("span.koumoku:contains('収録時間')").Parent().Text(); runtime != "" {
+		// Extract just the time part
+		re := regexp.MustCompile(`\d+`)
+		if matches := re.FindString(runtime); matches != "" {
+			movieData.Runtime = matches
+		}
+	}
+	
+	// Extract release date
+	if release := doc.Find("#avodDetails ul li:nth-child(2)").Text(); release != "" {
+		movieData.Release = strings.TrimSpace(release)
+		movieData.Year = extractYear(release)
+	}
+	
+	// Extract tags
+	var tags []string
+	doc.Find("span.koumoku:contains('ジャンル')").Parent().Find("a[href*='/avod/genre/']").Each(func(i int, s *goquery.Selection) {
+		if tag := strings.TrimSpace(s.Text()); tag != "" {
+			tags = append(tags, tag)
+		}
+	})
+	movieData.Tag = tags
+	
+	// Extract director
+	if director := doc.Find("#program_detail_director").Text(); director != "" {
+		movieData.Director = strings.TrimSpace(director)
+	}
+	
+	// Extract series
+	if series := doc.Find("span:contains('シリーズ')").Parent().Find("a span").Text(); series != "" {
+		movieData.Series = strings.TrimSpace(series)
+	} else if series := doc.Find("span:contains('シリーズ')").Parent().Find("span").Text(); series != "" {
+		movieData.Series = strings.TrimSpace(series)
+	}
+	
+	// Extract extra fanart
+	var extraFanart []string
+	doc.Find("div#sample_images div a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			extraFanart = append(extraFanart, href)
+		}
+	})
+	movieData.Extrafanart = extraFanart
+	
+	// Extract outline from og:description
+	if outline, exists := doc.Find("meta[property='og:description']").Attr("content"); exists {
+		movieData.Outline = strings.TrimSpace(outline)
+	}
+	
+	logger.Debug("Successfully scraped XCity data for: %s", movieData.Number)
+	return movieData, nil
+}
+
+// scrapeMGStage scrapes movie data from MGStage
+func (s *Scraper) scrapeMGStage(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting MGStage scraping for number: %s", number)
+	
+	// MGStage direct URL pattern
+	detailURL := fmt.Sprintf("https://www.mgstage.com/product/product_detail/%s/", number)
+	
+	// Set headers with age verification cookie
+	headers := map[string]string{
+		"Cookie": "adc=1",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, detailURL, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("page not found")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	// Read the response body to check content
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("FC2 response body length: %d bytes", len(body))
+	if len(body) > 0 {
+		// Log first 500 characters for debugging
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		logger.Debug("FC2 response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: detailURL,
+		Source:  "mgstage",
+		Number:  number,
+	}
+	
+	// Extract title - correct selector based on Python version
+	if title := doc.Find("#center_column div h1").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(strings.ReplaceAll(title, "/", ","))
+	}
+	
+	// Extract cover - correct selector
+	if cover, exists := doc.Find("#EnlargeImage").Attr("href"); exists {
+		movieData.Cover = cover
+	}
+	
+	// Extract information from detail table
+	doc.Find("table.detail_data tr").Each(func(i int, s *goquery.Selection) {
+		label := strings.TrimSpace(s.Find("th").Text())
+		value := strings.TrimSpace(s.Find("td").Text())
+		
+		switch {
+		case strings.Contains(label, "出演"):
+			if value != "" {
+				actors := strings.Split(value, " ")
+				movieData.ActorList = actors
+			}
+		case strings.Contains(label, "メーカー"):
+			movieData.Studio = value
+		case strings.Contains(label, "収録時間"):
+			movieData.Runtime = value
+		case strings.Contains(label, "配信開始日"):
+			movieData.Release = value
+			movieData.Year = extractYear(value)
+		case strings.Contains(label, "シリーズ"):
+			movieData.Series = value
+		case strings.Contains(label, "ジャンル"):
+			if value != "" {
+				tags := strings.Split(value, " ")
+				movieData.Tag = tags
+			}
+		}
+	})
+	
+	logger.Debug("Successfully scraped MGStage data for: %s", movieData.Number)
+	return movieData, nil
+}
+
+// scrapeFC2 scrapes movie data from FC2
+func (s *Scraper) scrapeFC2(ctx context.Context, number string) (*MovieData, error) {
+	// FC2 numbers typically start with "FC2"
+	if !strings.HasPrefix(strings.ToUpper(number), "FC2") {
+		return nil, fmt.Errorf("not an FC2 number")
+	}
+	
+	logger.Debug("Starting FC2 scraping for number: %s", number)
+	
+	// Extract FC2 ID - handle FC2-PPV- prefix properly
+	fc2ID := strings.ToLower(number)
+	fc2ID = strings.TrimPrefix(fc2ID, "fc2-ppv-")
+	fc2ID = strings.TrimPrefix(fc2ID, "fc2-")
+	
+	// Define headers for FC2 requests
+	headers := map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.5",
+		"Accept-Encoding": "identity",
+		"Connection":      "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+	}
+	
+	// Try different FC2 URL formats - the adult.contents requires login
+	// Let's try the public search page first
+	searchURL := fmt.Sprintf("https://adult.contents.fc2.com/search/?keyword=%s", fc2ID)
+	logger.Debug("Trying FC2 search URL: %s", searchURL)
+	
+	// First try to search for the content
+	searchResp, err := s.httpClient.Get(ctx, searchURL, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch search page: %w", err)
+	}
+	defer searchResp.Body.Close()
+	
+	logger.Debug("FC2 search response status: %d", searchResp.StatusCode)
+	
+	// Read search response body
+	searchBody, err := io.ReadAll(searchResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read search response body: %w", err)
+	}
+	
+	logger.Debug("FC2 search response body length: %d", len(searchBody))
+	if len(searchBody) > 500 {
+		logger.Debug("FC2 search response preview: %s", string(searchBody[:500]))
+	} else {
+		logger.Debug("FC2 search response preview: %s", string(searchBody))
+	}
+	
+	// Parse search results to find the actual detail URL
+	searchDoc, err := goquery.NewDocumentFromReader(strings.NewReader(string(searchBody)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse search HTML: %w", err)
+	}
+	
+	// Look for the detail link in search results
+	var detailURL string
+	searchDoc.Find("a[href*='/article/']").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists && detailURL == "" {
+			if strings.Contains(href, fc2ID) {
+				if strings.HasPrefix(href, "http") {
+					detailURL = href
+				} else {
+					detailURL = "https://adult.contents.fc2.com" + href
+				}
+				logger.Debug("Found FC2 detail URL: %s", detailURL)
+			}
+		}
+	})
+	
+	if detailURL == "" {
+		return nil, fmt.Errorf("could not find detail page for FC2 ID: %s", fc2ID)
+	}
+	
+	// Use the headers defined earlier in the function
+	
+	resp, err := s.httpClient.Get(ctx, detailURL, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	logger.Debug("FC2 response status: %d for URL: %s", resp.StatusCode, detailURL)
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("page not found")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	// Read response body for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	logger.Debug("FC2 response body length: %d", len(body))
+	if len(body) > 500 {
+		logger.Debug("FC2 response body preview: %s", string(body[:500]))
+	} else {
+		logger.Debug("FC2 response body preview: %s", string(body))
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website:    detailURL,
+		Source:     "fc2",
+		Number:     "FC2-" + fc2ID, // Normalize number format
+		Uncensored: true, // FC2 is typically uncensored
+	}
+	
+	// Extract title from page title and clean it
+	rawTitle := doc.Find("title").Text()
+	logger.Debug("FC2 raw title: '%s'", rawTitle)
+	
+	if rawTitle != "" {
+		// Clean the title by removing FC2 prefix and other unwanted text
+		title := strings.TrimSpace(rawTitle)
+		title = strings.TrimPrefix(title, "FC2")
+		title = strings.TrimSpace(title)
+		// Remove common suffixes
+		if idx := strings.Index(title, " - FC2"); idx > 0 {
+			title = title[:idx]
+		}
+		if idx := strings.Index(title, " | FC2"); idx > 0 {
+			title = title[:idx]
+		}
+		movieData.Title = strings.TrimSpace(title)
+		logger.Debug("FC2 cleaned title: '%s'", movieData.Title)
+	}
+	
+	// If title is still empty, try alternative selectors
+	if movieData.Title == "" {
+		// Try h1 tag
+		if title := doc.Find("h1").First().Text(); title != "" {
+			movieData.Title = strings.TrimSpace(title)
+			logger.Debug("FC2 h1 title: '%s'", movieData.Title)
+		}
+	}
+	
+	// If still empty, try article title
+	if movieData.Title == "" {
+		if title := doc.Find(".items_article_headerInfo h3").Text(); title != "" {
+			movieData.Title = strings.TrimSpace(title)
+			logger.Debug("FC2 article title: '%s'", movieData.Title)
+		}
+	}
+	
+	// If still empty, try any text content as fallback
+	if movieData.Title == "" {
+		if title := doc.Find(".items_article_headerInfo").Text(); title != "" {
+			movieData.Title = strings.TrimSpace(title)
+			logger.Debug("FC2 fallback title: '%s'", movieData.Title)
+		}
+	}
+	
+	logger.Debug("FC2 final title: '%s'", movieData.Title)
+	
+	// Extract cover using correct selector
+	if cover, exists := doc.Find("div.items_article_MainitemThumb span img").Attr("src"); exists {
+		movieData.Cover = cover
+	}
+	
+	// Extract tags
+	doc.Find("a.tag.tagTag").Each(func(i int, s *goquery.Selection) {
+		if tag := strings.TrimSpace(s.Text()); tag != "" {
+			movieData.Tag = append(movieData.Tag, tag)
+		}
+	})
+	
+	// Extract extra fanart
+	doc.Find("ul.items_article_SampleImagesArea li a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			movieData.Extrafanart = append(movieData.Extrafanart, href)
+		}
+	})
+	
+	logger.Debug("Successfully scraped FC2 data for: %s", movieData.Number)
+	return movieData, nil
+}
+
+// scrapeAVSOX scrapes movie data from AVSOX
+func (s *Scraper) scrapeAVSOX(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting AVSOX scraping for number: %s", number)
+	
+	// First get the current AVSOX site URL from tellme.pw
+	resp, err := s.httpClient.Get(ctx, "https://tellme.pw/avsox", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get site URL: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse site URL page: %w", err)
+	}
+	
+	// Extract current site URL
+	var siteURL string
+	doc.Find("div.container div a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			siteURL = href
+			return
+		}
+	})
+	
+	if siteURL == "" {
+		return nil, fmt.Errorf("failed to get current AVSOX site URL")
+	}
+	
+	// Try different search patterns
+	searchPatterns := []string{
+		number,
+		strings.ReplaceAll(number, "-", "_"),
+		strings.ReplaceAll(number, "_", ""),
+	}
+	
+	// Set headers to mimic a real browser (let Go handle compression automatically)
+	headers := map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.5",
+		"Connection":      "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+	}
+	
+	for _, pattern := range searchPatterns {
+		searchURL := fmt.Sprintf("%s/cn/search/%s", siteURL, url.QueryEscape(pattern))
+		logger.Debug("Trying AVSOX search URL: %s", searchURL)
+		
+		resp, err := s.httpClient.Get(ctx, searchURL, headers)
+		if err != nil {
+			logger.Debug("AVSOX search request failed: %v", err)
+			continue
+		}
+		defer resp.Body.Close()
+		
+		logger.Debug("AVSOX search response status: %d", resp.StatusCode)
+		if resp.StatusCode != 200 {
+			continue
+		}
+		
+		// Read response body for debugging
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logger.Debug("Failed to read AVSOX response body: %v", err)
+			continue
+		}
+		
+		logger.Debug("AVSOX search response body length: %d", len(body))
+		if len(body) > 500 {
+			logger.Debug("AVSOX search response preview: %s", string(body[:500]))
+		} else {
+			logger.Debug("AVSOX search response preview: %s", string(body))
+		}
+		
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+		if err != nil {
+			logger.Debug("Failed to parse AVSOX HTML: %v", err)
+			continue
+		}
+		
+		// Try multiple selectors for finding results
+		var detailURL string
+		
+		// Try original selector - look for movie links specifically
+		doc.Find("#waterfall div a").Each(func(i int, s *goquery.Selection) {
+			if href, exists := s.Attr("href"); exists {
+				logger.Debug("Found link in #waterfall: %s", href)
+				// Look for movie links, not star links - be more specific
+				if strings.Contains(href, "/movie/") || strings.Contains(href, "/cn/movie/") {
+					if strings.HasPrefix(href, "/") {
+						detailURL = siteURL + href
+					} else if strings.HasPrefix(href, "//") {
+						detailURL = "https:" + href
+					} else {
+						detailURL = href
+					}
+					logger.Debug("Found movie link: %s", detailURL)
+					return // Found one, stop looking
+				}
+			}
+		})
+		
+		// Try alternative selectors if first one fails
+		if detailURL == "" {
+			// Try looking for movie links in different containers
+			doc.Find("a").Each(func(i int, s *goquery.Selection) {
+				if href, exists := s.Attr("href"); exists {
+					// Look for links that contain "/movie/" in the URL specifically
+					if strings.Contains(href, "/movie/") && !strings.Contains(href, "search") {
+						logger.Debug("Found potential movie link: %s", href)
+						if strings.HasPrefix(href, "/") {
+							detailURL = siteURL + href
+						} else if strings.HasPrefix(href, "//") {
+							detailURL = "https:" + href
+						} else {
+							detailURL = href
+						}
+						return // Found one, stop looking
+					}
+				}
+			})
+		}
+		
+		// If still no movie link found, try to construct direct movie URL
+		if detailURL == "" {
+			// Some sites use direct movie URLs like /movie/SSIS-001
+			potentialURL := fmt.Sprintf("%s/cn/movie/%s", siteURL, pattern)
+			logger.Debug("Trying direct movie URL: %s", potentialURL)
+			
+			// Test if this URL exists
+			testResp, err := s.httpClient.Get(ctx, potentialURL, headers)
+			if err == nil {
+				defer testResp.Body.Close()
+				if testResp.StatusCode == 200 {
+					detailURL = potentialURL
+					logger.Debug("Direct movie URL works: %s", detailURL)
+				}
+			}
+		}
+		
+		if detailURL != "" {
+			logger.Debug("Found AVSOX detail URL: %s", detailURL)
+			return s.scrapeAVSOXPage(ctx, detailURL)
+		}
+	}
+	
+	return nil, fmt.Errorf("no detail page found for number: %s", number)
+}
+
+// scrapeAVSOXPage scrapes a specific AVSOX detail page
+func (s *Scraper) scrapeAVSOXPage(ctx context.Context, url string) (*MovieData, error) {
+	resp, err := s.httpClient.Get(ctx, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: url,
+		Source:  "avsox",
+	}
+	
+	// Extract basic information
+	if title := doc.Find("h3").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	if cover, exists := doc.Find(".bigImage").Attr("href"); exists {
+		movieData.Cover = cover
+	}
+	
+	logger.Debug("Successfully scraped AVSOX data for: %s", movieData.Title)
+	return movieData, nil
+}
+
+// scrapeJAV321 scrapes movie data from JAV321
+func (s *Scraper) scrapeJAV321(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting JAV321 scraping for number: %s", number)
+	
+	// JAV321 search URL
+	searchURL := fmt.Sprintf("https://www.jav321.com/search?q=%s", url.QueryEscape(number))
+	logger.Debug("JAV321 search URL: %s", searchURL)
+	
+	// Add headers to mimic browser behavior
+	headers := map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.5",
+		"Cache-Control":   "no-cache",
+		"Pragma":          "no-cache",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, searchURL, headers)
+	if err != nil {
+		logger.Debug("JAV321 request failed: %v", err)
+		return nil, fmt.Errorf("failed to search: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	logger.Debug("JAV321 response status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search returned status %d", resp.StatusCode)
+	}
+	
+	// Read response body for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	logger.Debug("JAV321 response body length: %d", len(body))
+	if len(body) > 0 {
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		logger.Debug("JAV321 response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	// Find first result
+	var detailURL string
+	logger.Debug("Looking for results in .row .item")
+	doc.Find(".row .item").Each(func(i int, s *goquery.Selection) {
+		logger.Debug("Found item %d", i)
+		s.Find("a").Each(func(j int, a *goquery.Selection) {
+			if href, exists := a.Attr("href"); exists {
+				logger.Debug("Found link: %s", href)
+				if detailURL == "" { // Take the first one
+					if strings.HasPrefix(href, "/") {
+						detailURL = "https://www.jav321.com" + href
+					} else {
+						detailURL = href
+					}
+					logger.Debug("Selected detail URL: %s", detailURL)
+				}
+			}
+		})
+	})
+	
+	if detailURL == "" {
+		logger.Debug("No detail URL found, trying alternative selectors")
+		// Try different selectors for movie links
+		selectors := []string{".item a", ".video-item a", ".movie-item a", "a[href*='video']", "a[href*='movie']"}
+		for _, selector := range selectors {
+			logger.Debug("Trying selector: %s", selector)
+			doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+				if href, exists := s.Attr("href"); exists {
+					// Skip language switch links and search links
+					if strings.Contains(href, "search") || strings.Contains(href, "en.jav321") || strings.Contains(href, "jp.jav321") || strings.Contains(href, "tw.jav321") {
+						return
+					}
+					logger.Debug("Found potential link with %s: %s", selector, href)
+					if detailURL == "" {
+						if strings.HasPrefix(href, "//") {
+							detailURL = "https:" + href
+						} else if strings.HasPrefix(href, "/") {
+							detailURL = "https://www.jav321.com" + href
+						} else if !strings.HasPrefix(href, "http") {
+							detailURL = "https://www.jav321.com/" + href
+						} else {
+							detailURL = href
+						}
+						logger.Debug("Selected detail URL: %s", detailURL)
+					}
+				}
+			})
+			if detailURL != "" {
+				break
+			}
+		}
+	}
+	
+	if detailURL == "" {
+		return nil, fmt.Errorf("no detail page found for number: %s", number)
+	}
+	
+	logger.Debug("JAV321 proceeding with detail URL: %s", detailURL)
+	return s.scrapeJAV321Page(ctx, detailURL)
+}
+
+// scrapeJAV321Page scrapes a specific JAV321 detail page
+func (s *Scraper) scrapeJAV321Page(ctx context.Context, url string) (*MovieData, error) {
+	resp, err := s.httpClient.Get(ctx, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: url,
+		Source:  "jav321",
+	}
+	
+	// Extract basic information
+	if title := doc.Find("h3.panel-title").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	logger.Debug("Successfully scraped JAV321 data for: %s", movieData.Title)
+	return movieData, nil
+}
+
+// scrapeJavLibrary scrapes movie data from JavLibrary
+func (s *Scraper) scrapeJavLibrary(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting JavLibrary scraping for number: %s", number)
+	
+	// JavLibrary search URL
+	searchURL := fmt.Sprintf("https://www.javlibrary.com/cn/vl_searchbyid.php?keyword=%s", url.QueryEscape(number))
+	logger.Debug("JavLibrary search URL: %s", searchURL)
+	
+	// Add comprehensive headers to bypass anti-bot protection
+	headers := map[string]string{
+		"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+		"Accept-Language":           "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+		"Accept-Encoding":           "gzip, deflate, br",
+		"DNT":                       "1",
+		"Connection":                "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+		"Sec-Fetch-Dest":            "document",
+		"Sec-Fetch-Mode":            "navigate",
+		"Sec-Fetch-Site":            "none",
+		"Sec-Fetch-User":            "?1",
+		"Cache-Control":             "max-age=0",
+		"Referer":                   "https://www.javlibrary.com/cn/",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, searchURL, headers)
+	if err != nil {
+		logger.Debug("JavLibrary request failed: %v", err)
+		return nil, fmt.Errorf("failed to search: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	logger.Debug("JavLibrary response status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search returned status %d", resp.StatusCode)
+	}
+	
+	// Read response body for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	logger.Debug("JavLibrary response body length: %d", len(body))
+	if len(body) > 0 {
+		preview := string(body)
+		if len(preview) > 300 {
+			preview = preview[:300] + "..."
+		}
+		logger.Debug("JavLibrary response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	// Find first result
+	var detailURL string
+	logger.Debug("Looking for results in .video")
+	doc.Find(".video").Each(func(i int, s *goquery.Selection) {
+		logger.Debug("Found video item %d", i)
+		s.Find("a").Each(func(j int, a *goquery.Selection) {
+			if href, exists := a.Attr("href"); exists {
+				logger.Debug("Found link: %s", href)
+				if detailURL == "" { // Take the first one
+					if strings.HasPrefix(href, "/") {
+						detailURL = "https://www.javlibrary.com" + href
+					} else {
+						detailURL = href
+					}
+					logger.Debug("Selected detail URL: %s", detailURL)
+				}
+			}
+		})
+	})
+	
+	if detailURL == "" {
+		logger.Debug("No detail URL found, trying alternative selectors")
+		// Try alternative selectors
+		selectors := []string{"a[href*='?v=']", ".video-title a", "a[title*='%s']", "a"}
+		for _, selector := range selectors {
+			logger.Debug("Trying selector: %s", selector)
+			doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+				if href, exists := s.Attr("href"); exists {
+					if strings.Contains(href, "?v=") || strings.Contains(strings.ToLower(s.Text()), strings.ToLower(number)) {
+						logger.Debug("Found potential link with %s: %s", selector, href)
+						if detailURL == "" {
+							if strings.HasPrefix(href, "/") {
+								detailURL = "https://www.javlibrary.com" + href
+							} else {
+								detailURL = href
+							}
+							logger.Debug("Selected alternative detail URL: %s", detailURL)
+						}
+					}
+				}
+			})
+			if detailURL != "" {
+				break
+			}
+		}
+	}
+	
+	if detailURL == "" {
+		return nil, fmt.Errorf("no detail page found for number: %s", number)
+	}
+	
+	logger.Debug("JavLibrary proceeding with detail URL: %s", detailURL)
+	return s.scrapeJavLibraryPage(ctx, detailURL)
+}
+
+// scrapeJavLibraryPage scrapes a specific JavLibrary detail page
+func (s *Scraper) scrapeJavLibraryPage(ctx context.Context, url string) (*MovieData, error) {
+	// Use same headers as search to maintain consistency
+	headers := map[string]string{
+		"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+		"Accept-Language":           "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+		"Accept-Encoding":           "gzip, deflate, br",
+		"DNT":                       "1",
+		"Connection":                "keep-alive",
+		"Upgrade-Insecure-Requests": "1",
+		"Sec-Fetch-Dest":            "document",
+		"Sec-Fetch-Mode":            "navigate",
+		"Sec-Fetch-Site":            "same-origin",
+		"Sec-Fetch-User":            "?1",
+		"Cache-Control":             "max-age=0",
+		"Referer":                   "https://www.javlibrary.com/cn/",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, url, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	logger.Debug("JavLibrary detail page response status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: url,
+		Source:  "javlibrary",
+	}
+	
+	// Extract basic information
+	if title := doc.Find("#video_title h3 a").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	if number := doc.Find("#video_id .text").Text(); number != "" {
+		movieData.Number = strings.TrimSpace(number)
+	}
+	
+	if cover, exists := doc.Find("#video_jacket_img").Attr("src"); exists {
+		if strings.HasPrefix(cover, "/") {
+			movieData.Cover = "https://www.javlibrary.com" + cover
+		} else {
+			movieData.Cover = cover
+		}
+	}
+	
+	logger.Debug("Successfully scraped JavLibrary data for: %s", movieData.Number)
+	return movieData, nil
+}
+
+// scrapeAIRAV scrapes movie data from AIRAV
+func (s *Scraper) scrapeAIRAV(ctx context.Context, number string) (*MovieData, error) {
+	logger.Debug("Starting AIRAV scraping for number: %s", number)
+	
+	// AIRAV search URL
+	searchURL := fmt.Sprintf("https://www.airav.wiki/search?q=%s", url.QueryEscape(number))
+	logger.Debug("AIRAV search URL: %s", searchURL)
+	
+	// Add headers to improve request success rate
+	headers := map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.9,zh-CN,zh;q=0.8",
+		"Cache-Control":   "no-cache",
+		"Pragma":          "no-cache",
+		"Connection":      "keep-alive",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, searchURL, headers)
+	if err != nil {
+		logger.Debug("AIRAV request failed: %v", err)
+		return nil, fmt.Errorf("failed to search: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	logger.Debug("AIRAV response status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search returned status %d", resp.StatusCode)
+	}
+	
+	// Read response body for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	logger.Debug("AIRAV response body length: %d", len(body))
+	if len(body) > 0 {
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		logger.Debug("AIRAV response preview: %s", preview)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	// Find first result
+	var detailURL string
+	logger.Debug("Looking for results in .item")
+	doc.Find(".item").Each(func(i int, s *goquery.Selection) {
+		logger.Debug("Found item %d", i)
+		s.Find("a").Each(func(j int, a *goquery.Selection) {
+			if href, exists := a.Attr("href"); exists {
+				logger.Debug("Found link: %s", href)
+				if detailURL == "" { // Take the first one
+					if strings.HasPrefix(href, "/") {
+						detailURL = "https://www.airav.wiki" + href
+					} else {
+						detailURL = href
+					}
+					logger.Debug("Selected detail URL: %s", detailURL)
+				}
+			}
+		})
+	})
+	
+	if detailURL == "" {
+		logger.Debug("No detail URL found, trying alternative selectors")
+		// Try alternative selectors
+		selectors := []string{"a[href*='video']", ".video-item a", ".movie-item a", "a"}
+		for _, selector := range selectors {
+			logger.Debug("Trying selector: %s", selector)
+			doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+				if href, exists := s.Attr("href"); exists {
+					if strings.Contains(href, "video") || strings.Contains(strings.ToLower(s.Text()), strings.ToLower(number)) {
+						logger.Debug("Found potential link with %s: %s", selector, href)
+						if detailURL == "" {
+							if strings.HasPrefix(href, "/") {
+								detailURL = "https://www.airav.wiki" + href
+							} else {
+								detailURL = href
+							}
+							logger.Debug("Selected alternative detail URL: %s", detailURL)
+						}
+					}
+				}
+			})
+			if detailURL != "" {
+				break
+			}
+		}
+	}
+	
+	if detailURL == "" {
+		return nil, fmt.Errorf("no detail page found for number: %s", number)
+	}
+	
+	logger.Debug("AIRAV proceeding with detail URL: %s", detailURL)
+	return s.scrapeAIRAVPage(ctx, detailURL)
+}
+
+// scrapeAIRAVPage scrapes a specific AIRAV detail page
+func (s *Scraper) scrapeAIRAVPage(ctx context.Context, url string) (*MovieData, error) {
+	logger.Debug("AIRAV fetching detail page: %s", url)
+	
+	// Add headers to improve request success rate
+	headers := map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.9,zh-CN,zh;q=0.8",
+		"Cache-Control":   "no-cache",
+		"Pragma":          "no-cache",
+		"Connection":      "keep-alive",
+	}
+	
+	resp, err := s.httpClient.Get(ctx, url, headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	logger.Debug("AIRAV detail page response status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+	
+	movieData := &MovieData{
+		Website: url,
+		Source:  "airav",
+	}
+	
+	// Extract basic information
+	if title := doc.Find(".video-title").Text(); title != "" {
+		movieData.Title = strings.TrimSpace(title)
+	}
+	
+	logger.Debug("Successfully scraped AIRAV data for: %s", movieData.Title)
+	return movieData, nil
+}
+
+// extractYear extracts year from date string
+func extractYear(dateStr string) string {
+	re := regexp.MustCompile(`(\d{4})`)
+	matches := re.FindStringSubmatch(dateStr)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
