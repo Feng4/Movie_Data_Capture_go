@@ -112,32 +112,34 @@ jobs:
       run: |
         go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
 
-    - name: Prepare release package
+    - name: Create package directory
       run: |
-        # Create unique directory name to avoid conflicts
-        BUILD_DIR="release-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}"
-        mkdir -p "$BUILD_DIR"
-        
-        # Copy binary
-        cp mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} "$BUILD_DIR/"
-        
-        # Copy additional files if they exist
-        [ -f config.yaml ] && cp config.yaml "$BUILD_DIR/" || echo "config.yaml not found"
-        [ -f README.md ] && cp README.md "$BUILD_DIR/" || echo "README.md not found"
-        [ -d Img ] && cp -r Img "$BUILD_DIR/" || echo "Img directory not found"
-        
-        # Create archive
-        if [ "${{ matrix.os }}" = "windows" ]; then
-          # Use PowerShell for Windows
-          powershell -Command "Compress-Archive -Path '$BUILD_DIR/*' -DestinationPath 'mdc-${{ matrix.os }}-${{ matrix.arch }}.zip' -Force"
-        else
-          # Use tar for Unix systems
-          tar -czf mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C "$BUILD_DIR" .
-        fi
-        
-        # Clean up temporary directory
-        rm -rf "$BUILD_DIR"
+        rm -rf mdc-${{ matrix.os }}-${{ matrix.arch }} 2>/dev/null || true
+        mkdir -p mdc-${{ matrix.os }}-${{ matrix.arch }}
+        cp mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} mdc-${{ matrix.os }}-${{ matrix.arch }}/
+        [ -f config.yaml ] && cp config.yaml mdc-${{ matrix.os }}-${{ matrix.arch }}/ || echo "config.yaml not found, skipping"
+        [ -f README.md ] && cp README.md mdc-${{ matrix.os }}-${{ matrix.arch }}/ || echo "README.md not found, skipping"
       shell: bash
+
+    - name: Copy Img directory (if exists)
+      run: |
+        if [ -d "Img" ]; then
+          cp -r Img mdc-${{ matrix.os }}-${{ matrix.arch }}/
+        else
+          echo "Img directory not found, skipping"
+        fi
+      shell: bash
+
+    - name: Create archive (Windows)
+      if: matrix.os == 'windows'
+      run: |
+        Compress-Archive -Path "mdc-${{ matrix.os }}-${{ matrix.arch }}" -DestinationPath "mdc-${{ matrix.os }}-${{ matrix.arch }}.zip" -Force
+      shell: powershell
+
+    - name: Create archive (Unix)
+      if: matrix.os != 'windows'
+      run: |
+        tar -czf mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz mdc-${{ matrix.os }}-${{ matrix.arch }}
 
     - name: Upload artifact (Windows)
       if: matrix.os == 'windows'
@@ -145,7 +147,6 @@ jobs:
       with:
         name: mdc-${{ matrix.os }}-${{ matrix.arch }}
         path: mdc-${{ matrix.os }}-${{ matrix.arch }}.zip
-        retention-days: 30
 
     - name: Upload artifact (Unix)
       if: matrix.os != 'windows'
@@ -153,7 +154,6 @@ jobs:
       with:
         name: mdc-${{ matrix.os }}-${{ matrix.arch }}
         path: mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
-        retention-days: 30
 
   release:
     name: Create Release
@@ -165,6 +165,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
     - name: Set version for release
       id: version
       run: |
@@ -174,15 +179,8 @@ jobs:
           echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
         fi
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./artifacts
-
     - name: Display structure of downloaded files
-      run: |
-        echo "=== Downloaded artifacts ==="
-        find ./artifacts -type f -name "*.zip" -o -name "*.tar.gz" | sort
+      run: ls -la ./artifacts/*/
 
     - name: Create Release
       id: create_release
@@ -218,13 +216,13 @@ jobs:
           1. 下载对应平台的压缩包
           2. 解压到任意目录
           3. 编辑 `config.yaml` 配置文件
-          4. 运行程序
+          4. 运行 `mdc` 程序
           
           ### 📝 更新内容
           
-          - 🐛 修复编译问题
-          - ✨ 优化构建流程
-          - 🔧 改进跨平台兼容性
+          - 🐛 修复已知问题
+          - ✨ 新增功能特性
+          - 🔧 优化性能表现
           
           完整的更新日志请查看 [README.md](https://github.com/Feng4/movie-data-capture-go/blob/main/README.md)
         draft: false
@@ -232,12 +230,10 @@ jobs:
 
     - name: Upload Release Assets
       run: |
-        echo "=== Uploading release assets ==="
-        for artifact_dir in ./artifacts/*/; do
-          echo "Processing directory: $artifact_dir"
-          for file in "$artifact_dir"*.{zip,tar.gz}; do
+        for dir in ./artifacts/*/; do
+          for file in "$dir"*; do
             if [ -f "$file" ]; then
-              echo "Uploading: $file"
+              echo "Uploading $file"
               gh release upload ${{ steps.version.outputs.VERSION }} "$file" --clobber
             fi
           done
