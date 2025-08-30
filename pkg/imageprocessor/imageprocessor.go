@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +158,7 @@ func (ip *ImageProcessor) copyImage(srcPath, dstPath string) error {
 	defer dstFile.Close()
 
 	// Copy file content
-	_, err = srcFile.WriteTo(dstFile)
+	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to copy image: %w", err)
 	}
