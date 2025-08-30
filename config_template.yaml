@@ -1,0 +1,230 @@
+# Movie Data Capture Go 配置模板
+# 详细的配置说明和示例
+
+# ==============================================
+# 通用配置 (Common Configuration)
+# ==============================================
+common:
+  main_mode: 1                          # 运行模式: 1=刮削, 2=整理, 3=分析
+  source_folder: "./"                   # 源文件夹路径
+  failed_output_folder: "failed"       # 失败文件输出文件夹
+  success_output_folder: "JAV_output"  # 成功文件输出文件夹
+  link_mode: 0                          # 文件处理模式: 0=移动, 1=软链接, 2=硬链接
+  scan_hardlink: false                  # 扫描硬链接文件
+  failed_move: true                     # 将失败文件移动到失败文件夹
+  auto_exit: false                      # 完成后自动退出
+  translate_to_sc: true                 # 翻译为简体中文
+  actor_gender: "female"                # 演员性别过滤器: female, male, both, all
+  del_empty_folder: true                # 处理后删除空文件夹
+  nfo_skip_days: 30                     # 跳过N天内修改过NFO的文件
+  ignore_failed_list: false             # 忽略失败列表
+  download_only_missing_images: true    # 仅下载缺失的图片
+  mapping_table_validity: 7             # 映射表有效期（天）
+  jellyfin: 0                          # Jellyfin兼容模式
+  actor_only_tag: false                # 仅使用演员姓名作为标签
+  sleep: 3                             # 请求间隔秒数
+  anonymous_fill: 0                    # 匿名填充模式
+  multi_threading: 0                   # 多线程（0=顺序处理）
+  stop_counter: 0                      # 处理N部电影后停止（0=无限制）
+  rerun_delay: "0"                     # 重新运行前的延迟（例如："1h30m"）
+
+# ==============================================
+# 网络代理配置 (Proxy Configuration)
+# ==============================================
+proxy:
+  switch: true                        # 启用代理 (强烈推荐)
+  proxy: "127.0.0.1:10808"                           # 代理地址和端口
+  timeout: 30                          # 超时时间（秒）
+  retry: 5                            # 重试次数
+  type: "socks5"                      # 代理类型: http, socks5, socks5h
+  cacert_file: ""                     # CA证书文件路径
+
+# ==============================================
+# 文件命名规则 (Naming Rules)
+# ==============================================
+name_rule:
+  location_rule: "actor + '/' + number"           # 文件夹位置规则
+  naming_rule: "number + '-' + title"            # 文件命名规则
+  max_title_len: 50                              # 最大标题长度
+  image_naming_with_number: false                # 在图片名称中使用番号
+  number_uppercase: false                        # 将番号转换为大写
+  number_regexs: ""                             # 自定义番号正则表达式模式
+
+# 可用变量说明:
+# - actor: 演员名
+# - number: 番号
+# - title: 标题  
+# - year: 年份
+# - studio: 制作商
+# - label: 系列名
+# - director: 导演
+
+# 示例命名规则:
+# location_rule: "studio + '/' + actor + '/' + number"
+# naming_rule: "actor + '_' + number + '_' + title"
+
+# ==============================================
+# 更新检查配置 (Update Configuration)
+# ==============================================
+update:
+  update_check: true                   # 检查更新
+
+# ==============================================
+# 数据源优先级 (Website Priority)
+# ==============================================
+priority:
+  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,avsox,jav321"
+  
+# 支持的数据源:
+# - javbus: JavBus (推荐，覆盖面广)
+# - fanza: FANZA (官方数据，质量高)  
+# - fc2: FC2 (素人作品专用)
+# - fc2club: FC2Club
+# - javdb: JavDB (备用数据源)
+# - xcity: X-City (无码作品)
+# - mgstage: MGStage
+# - avsox: AVSOX
+# - jav321: JAV321
+
+# ==============================================
+# 特殊字符处理 (Escape Configuration)
+# ==============================================
+escape:
+  literals: "\\()/ "                   # 路径中需要转义的字符
+  folders: "failed, JAV_output"       # 扫描时需要转义的文件夹
+
+# ==============================================
+# 调试模式 (Debug Mode)
+# ==============================================
+debug_mode:
+  switch: false                       # 启用调试模式 (详细日志输出)
+
+# ==============================================
+# 翻译功能 (Translation)
+# ==============================================
+translate:
+  switch: false                       # 启用翻译
+  engine: "google-free"               # 翻译引擎
+  target_language: "zh_cn"            # 目标语言
+  key: ""                            # 翻译服务密钥
+  delay: 1                           # 翻译间隔时间
+  values: "title,outline"             # 需要翻译的字段
+  service_site: "translate.google.cn" # 翻译服务网站
+
+# ==============================================
+# 预告片下载 (Trailer)
+# ==============================================
+trailer:
+  switch: false                       # 下载预告片
+
+# ==============================================
+# 无码作品配置 (Uncensored)
+# ==============================================
+uncensored:
+  uncensored_prefix: "S2M,BT,LAF,SMD" # 无码番号前缀
+
+# ==============================================
+# 媒体文件类型 (Media Types)
+# ==============================================
+media:
+  media_type: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso"
+  sub_type: ".smi,.srt,.idx,.sub,.sup,.psb,.ssa,.ass,.usf,.xss,.ssf,.rt,.lrc,.sbv,.vtt,.ttml"
+
+# ==============================================
+# 水印配置 (Watermark)
+# ==============================================
+watermark:
+  switch: true                        # 为图片添加水印
+  water: 2                           # 水印位置: 1=左上, 2=右上, 3=左下, 4=右下
+
+# ==============================================
+# 额外封面图配置 (Extra Fanart)
+# ==============================================
+extrafanart:
+  switch: true                        # 下载额外封面图
+  extrafanart_folder: "extrafanart"   # 额外封面图文件夹名称
+  parallel_download: 1                # 并行下载线程数
+
+# ==============================================
+# 剧情介绍配置 (Storyline)
+# ==============================================
+storyline:
+  switch: true                        # 启用剧情介绍
+  site: "1:avno1"        # 剧情介绍网站
+  censored_site: "5:xcity,6:amazon"
+  uncensored_site: "3:58avgo"
+  show_result: 0                      # 显示剧情介绍结果
+  run_mode: 1                         # 剧情介绍运行模式
+
+# ==============================================
+# 中文转换 (Chinese Conversion)
+# ==============================================
+cc_convert:
+  mode: 1                            # 中文转换模式
+  vars: "actor,director,label,outline,series,studio,tag,title"
+
+# ==============================================
+# JavDB配置 (JavDB Configuration)  
+# ==============================================
+javdb:
+  sites: "38,39"                     # JavDB网站后缀
+
+# ==============================================
+# 人脸识别配置 (Face Recognition)
+# ==============================================
+face:
+  locations_model: "hog"              # 人脸检测模型: hog, cnn
+  uncensored_only: true               # 仅对无码影片进行人脸检测
+  always_imagecut: false              # 总是执行图片裁剪
+  aspect_ratio: 2.12                  # 图片宽高比
+
+# ==============================================
+# Jellyfin配置 (Jellyfin Configuration)
+# ==============================================
+jellyfin:
+  multi_part_fanart: false            # Jellyfin多部分封面图
+
+# ==============================================
+# 演员照片下载 (Actor Photo)
+# ==============================================
+actor_photo:
+  download_for_kodi: false            # 为Kodi下载演员照片
+
+# ==============================================
+# STRM文件生成配置 (STRM Configuration)
+# ==============================================
+strm:
+  enable: false                         # 是否启用STRM文件生成
+  path_type: "absolute"                 # 路径类型: absolute, relative, network
+  content_mode: "simple"                # 内容模式: simple, detailed, playlist
+  multipart_mode: "separate"            # 分片模式: separate, combined
+  network_base_path: ""                 # 网络基础路径 (如: \\server\movies 或 smb://server/movies)
+  use_windows_path: false               # 使用Windows路径格式
+  validate_files: true                  # 验证引用的文件是否存在
+  strict_validation: false              # 严格验证（文件不存在时失败）
+  output_suffix: ""                     # 输出文件后缀
+
+# STRM配置示例:
+
+# 本地媒体服务器配置:
+# strm:
+#   enable: true
+#   path_type: "absolute"
+#   content_mode: "simple"
+#   multipart_mode: "separate"
+
+# 网络存储(NAS)配置:
+# strm:
+#   enable: true  
+#   path_type: "network"
+#   network_base_path: "\\\\nas-server\\movies"
+#   use_windows_path: true
+#   content_mode: "detailed"
+#   validate_files: false
+
+# Docker容器配置:
+# strm:
+#   enable: true
+#   path_type: "absolute" 
+#   network_base_path: "/media/movies"
+#   content_mode: "simple"

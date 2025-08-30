@@ -107,3 +107,15 @@ jellyfin:
 
 actor_photo:
   download_for_kodi: false            # 为Kodi下载演员照片
+
+# STRM文件生成配置
+strm:
+  enable: false                         # 是否启用STRM文件生成
+  path_type: "absolute"                 # 路径类型: absolute, relative, network
+  content_mode: "simple"                # 内容模式: simple, detailed, playlist
+  multipart_mode: "separate"            # 分片模式: separate, combined
+  network_base_path: ""                 # 网络基础路径 (如: \\server\movies 或 smb://server/movies)
+  use_windows_path: false               # 使用Windows路径格式
+  validate_files: true                  # 验证引用的文件是否存在
+  strict_validation: false              # 严格验证（文件不存在时失败）
+  output_suffix: ""                     # 输出文件后缀
