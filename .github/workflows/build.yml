@@ -1,0 +1,237 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.1)'
+        required: true
+        default: 'v1.0.0'
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows builds
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            ext: .exe
+            
+          - os: windows
+            arch: 386
+            runner: windows-latest
+            ext: .exe
+            
+          # Linux builds
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            ext: ''
+            
+          - os: linux
+            arch: 386
+            runner: ubuntu-latest
+            ext: ''
+            
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            ext: ''
+            
+          - os: linux
+            arch: arm
+            runner: ubuntu-latest
+            ext: ''
+            
+          # macOS builds
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            ext: ''
+            
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            ext: ''
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Set version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref_type }}" == "tag" ]; then
+          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=dev-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+        CGO_ENABLED: 0
+      run: |
+        go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
+
+    - name: Prepare release package
+      run: |
+        # Create unique directory name to avoid conflicts
+        BUILD_DIR="release-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}"
+        mkdir -p "$BUILD_DIR"
+        
+        # Copy binary
+        cp mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} "$BUILD_DIR/"
+        
+        # Copy additional files if they exist
+        [ -f config.yaml ] && cp config.yaml "$BUILD_DIR/" || echo "config.yaml not found"
+        [ -f README.md ] && cp README.md "$BUILD_DIR/" || echo "README.md not found"
+        [ -d Img ] && cp -r Img "$BUILD_DIR/" || echo "Img directory not found"
+        
+        # Create archive
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          # Use PowerShell for Windows
+          powershell -Command "Compress-Archive -Path '$BUILD_DIR/*' -DestinationPath 'mdc-${{ matrix.os }}-${{ matrix.arch }}.zip' -Force"
+        else
+          # Use tar for Unix systems
+          tar -czf mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C "$BUILD_DIR" .
+        fi
+        
+        # Clean up temporary directory
+        rm -rf "$BUILD_DIR"
+      shell: bash
+
+    - name: Upload artifact (Windows)
+      if: matrix.os == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mdc-${{ matrix.os }}-${{ matrix.arch }}
+        path: mdc-${{ matrix.os }}-${{ matrix.arch }}.zip
+        retention-days: 30
+
+    - name: Upload artifact (Unix)
+      if: matrix.os != 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mdc-${{ matrix.os }}-${{ matrix.arch }}
+        path: mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set version for release
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Display structure of downloaded files
+      run: |
+        echo "=== Downloaded artifacts ==="
+        find ./artifacts -type f -name "*.zip" -o -name "*.tar.gz" | sort
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        name: Movie Data Capture Go ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## 🚀 Movie Data Capture Go ${{ steps.version.outputs.VERSION }}
+          
+          ### 📦 下载说明
+          
+          请根据你的操作系统下载对应的版本：
+          
+          - **Windows**:
+            - `mdc-windows-amd64.zip` - Windows 64位 (推荐)
+            - `mdc-windows-386.zip` - Windows 32位
+            
+          - **Linux**:
+            - `mdc-linux-amd64.tar.gz` - Linux 64位 (推荐)
+            - `mdc-linux-386.tar.gz` - Linux 32位
+            - `mdc-linux-arm64.tar.gz` - Linux ARM64
+            - `mdc-linux-arm.tar.gz` - Linux ARM
+            
+          - **macOS**:
+            - `mdc-darwin-amd64.tar.gz` - macOS Intel 芯片
+            - `mdc-darwin-arm64.tar.gz` - macOS Apple Silicon (M1/M2)
+          
+          ### 🔧 使用方法
+          
+          1. 下载对应平台的压缩包
+          2. 解压到任意目录
+          3. 编辑 `config.yaml` 配置文件
+          4. 运行程序
+          
+          ### 📝 更新内容
+          
+          - 🐛 修复编译问题
+          - ✨ 优化构建流程
+          - 🔧 改进跨平台兼容性
+          
+          完整的更新日志请查看 [README.md](https://github.com/Feng4/movie-data-capture-go/blob/main/README.md)
+        draft: false
+        prerelease: false
+        files: |
+          ./artifacts/*/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
