@@ -23,6 +23,7 @@ Movie Data Capture Go 是一个用 Go 语言编写的电影元数据自动抓取
 - **代理支持**: 支持 HTTP/SOCKS5 代理
 - **多线程处理**: 支持并发处理提高效率
 - **失败重试**: 智能重试机制处理网络异常
+- **STRM文件生成**: 为媒体中心生成STRM文件，支持软链接播放
 
 ## 🚀 快速开始
 
@@ -106,6 +107,12 @@ name_rule:
   location_rule: "actor + '/' + number"        # 文件夹规则
   naming_rule: "number + '-' + title"          # 命名规则
   max_title_len: 50                            # 最大标题长度
+
+strm:
+  enable: false                                # 启用STRM文件生成
+  path_type: "absolute"                        # 路径类型: absolute, relative, network
+  content_mode: "simple"                       # 内容模式: simple, detailed, playlist
+  multipart_mode: "separate"                   # 分片模式: separate, combined
 ```
 
 ### 支持的网站优先级

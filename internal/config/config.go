@@ -31,6 +31,7 @@ type Config struct {
 	Face         FaceConfig         `yaml:"face"`
 	Jellyfin     JellyfinConfig     `yaml:"jellyfin"`
 	ActorPhoto   ActorPhotoConfig   `yaml:"actor_photo"`
+	STRM         STRMConfig         `yaml:"strm"`
 }
 
 type CommonConfig struct {
@@ -158,6 +159,19 @@ type JellyfinConfig struct {
 
 type ActorPhotoConfig struct {
 	DownloadForKodi bool `yaml:"download_for_kodi"`
+}
+
+// STRMConfig STRM文件生成配置
+type STRMConfig struct {
+	Enable           bool   `yaml:"enable"`              // 是否启用STRM文件生成
+	PathType         string `yaml:"path_type"`           // 路径类型: absolute, relative, network
+	ContentMode      string `yaml:"content_mode"`        // 内容模式: simple, detailed, playlist
+	MultiPartMode    string `yaml:"multipart_mode"`      // 分片模式: separate, combined
+	NetworkBasePath  string `yaml:"network_base_path"`   // 网络基础路径
+	UseWindowsPath   bool   `yaml:"use_windows_path"`    // 使用Windows路径格式
+	ValidateFiles    bool   `yaml:"validate_files"`      // 验证引用的文件是否存在
+	StrictValidation bool   `yaml:"strict_validation"`   // 严格验证（文件不存在时失败）
+	OutputSuffix     string `yaml:"output_suffix"`       // 输出文件后缀
 }
 
 // Load loads configuration from file
@@ -307,6 +321,17 @@ func createDefaultConfig(path string) (*Config, error) {
 		},
 		ActorPhoto: ActorPhotoConfig{
 			DownloadForKodi: false,
+		},
+		STRM: STRMConfig{
+			Enable:           false,
+			PathType:         "absolute",
+			ContentMode:      "simple",
+			MultiPartMode:    "separate",
+			NetworkBasePath:  "",
+			UseWindowsPath:   false,
+			ValidateFiles:    true,
+			StrictValidation: false,
+			OutputSuffix:     "",
 		},
 	}
 

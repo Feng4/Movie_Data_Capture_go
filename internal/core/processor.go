@@ -17,6 +17,7 @@ import (
 	"movie-data-capture/pkg/logger"
 	"movie-data-capture/pkg/nfo"
 	"movie-data-capture/pkg/storage"
+	"movie-data-capture/pkg/strm"
 	"movie-data-capture/pkg/utils"
 	"movie-data-capture/pkg/watermark"
 )
@@ -31,6 +32,7 @@ type Processor struct {
 	watermark     *watermark.WatermarkProcessor
 	imageProcessor *imageprocessor.ImageProcessor
 	fragmentMgr   *fragment.FragmentManager
+	strmGen       *strm.STRMGenerator
 
 	// Concurrency control
 	semaphore  chan struct{}
@@ -72,6 +74,7 @@ func NewProcessor(cfg *config.Config) *Processor {
 		watermark:     watermark.NewWatermarkProcessor(cfg),
 		imageProcessor: imageprocessor.NewImageProcessor(cfg),
 		fragmentMgr:   fragment.NewFragmentManager(),
+		strmGen:       strm.New(cfg),
 		semaphore:     make(chan struct{}, maxWorkers),
 	}
 
@@ -578,6 +581,19 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 		return fmt.Errorf("failed to generate NFO: %w", err)
 	}
 
+	// Generate STRM file if enabled
+	if isMultiPart && len(fragmentFiles) > 0 {
+		err = p.strmGen.GenerateMultiPartSTRM(data, fragmentFiles, filepath.Dir(outputPath))
+		if err != nil {
+			logger.Warn("Failed to generate STRM file: %v", err)
+		}
+	} else {
+		err = p.strmGen.GenerateSTRM(data, filePath, filepath.Dir(outputPath))
+		if err != nil {
+			logger.Warn("Failed to generate STRM file: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -740,6 +756,12 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 	err = p.nfoGen.GenerateNFO(data, outputPath, part, chineseSubtitle, leak, uncensored, hack, fourK, iso, data.ActorList, posterPath, thumbPath, fanartPath, false, 0, 0, nil, 0)
 	if err != nil {
 		return fmt.Errorf("failed to generate NFO: %w", err)
+	}
+
+	// Generate STRM file if enabled
+	err = p.strmGen.GenerateSTRM(data, filePath, filepath.Dir(outputPath))
+	if err != nil {
+		logger.Warn("Failed to generate STRM file: %v", err)
 	}
 
 	return nil
