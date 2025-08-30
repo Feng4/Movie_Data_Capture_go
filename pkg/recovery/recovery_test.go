@@ -153,7 +153,7 @@ func TestRecoveryManager_SaveLoadState(t *testing.T) {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
 
-	process1 := rm1.CreateProcess("test-process-4", "Test Process 4", 3)
+	_ = rm1.CreateProcess("test-process-4", "Test Process 4", 3)
 	rm1.UpdateProcess("test-process-4", func(state *ProcessState) {
 		state.Status = StatusRunning
 		state.CompletedSteps = 2
@@ -439,17 +439,17 @@ func TestRecoveryManager_GetRecoveryStats(t *testing.T) {
 	// 创建不同状态的进程
 	rm.CreateProcess("pending-1", "Pending Process", 3)
 
-	process2 := rm.CreateProcess("running-1", "Running Process", 3)
+	_ = rm.CreateProcess("running-1", "Running Process", 3)
 	rm.UpdateProcess("running-1", func(state *ProcessState) {
 		state.Status = StatusRunning
 	})
 
-	process3 := rm.CreateProcess("completed-1", "Completed Process", 3)
+	_ = rm.CreateProcess("completed-1", "Completed Process", 3)
 	rm.UpdateProcess("completed-1", func(state *ProcessState) {
 		state.Status = StatusCompleted
 	})
 
-	process4 := rm.CreateProcess("failed-1", "Failed Process", 3)
+	_ = rm.CreateProcess("failed-1", "Failed Process", 3)
 	rm.UpdateProcess("failed-1", func(state *ProcessState) {
 		state.Status = StatusFailed
 		state.ErrorCount = 2

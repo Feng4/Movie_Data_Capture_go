@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	"movie-data-capture/pkg/retry"
 )
 
 // RecoveryManager 管理错误恢复和状态持久化

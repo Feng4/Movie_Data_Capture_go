@@ -30,34 +30,34 @@ func NewPerformanceOptimizedApp() *PerformanceOptimizedApp {
 	// 配置性能监控器
 	monitorConfig := DefaultMonitorConfig()
 	monitorConfig.UpdateInterval = 5 * time.Second
-	monitorConfig.EnableMetrics = true
+	monitorConfig.LogMetrics = true
 	monitorConfig.MemoryThreshold = 500 * 1024 * 1024 // 500MB
-	monitorConfig.GoroutineThreshold = 1000
+	monitorConfig.GoroutineLimit = 1000
 
 	// 配置工作池
 	workerConfig := DefaultWorkerPoolConfig()
 	workerConfig.WorkerCount = runtime.NumCPU()
 	workerConfig.MaxWorkers = runtime.NumCPU() * 2
 	workerConfig.QueueSize = 1000
-	workerConfig.EnableAutoScaling = true
-	workerConfig.ScaleUpThreshold = 80
-	workerConfig.ScaleDownThreshold = 20
+	workerConfig.AutoScale = true
+	workerConfig.ScaleThreshold = 80
+	// workerConfig.ScaleDownThreshold = 20  // 这个字段不存在，注释掉
 
-	// 配置速率限制器
-	rateLimiterConfig := DefaultRateLimiterConfig()
-	rateLimiterConfig.Rate = 100 // 100 requests per second
-	rateLimiterConfig.Burst = 50
+	// 配置速率限制器 (暂时注释，因为DefaultRateLimiterConfig函数不存在)
+	// rateLimiterConfig := DefaultRateLimiterConfig()
+	// rateLimiterConfig.Rate = 100 // 100 requests per second
+	// rateLimiterConfig.Burst = 50
 
 	// 配置内存池
 	memoryConfig := DefaultMemoryPoolConfig()
-	memoryConfig.BufferSize = 64 * 1024 // 64KB buffers
-	memoryConfig.MaxBuffers = 100
+	memoryConfig.MinSize = 64 * 1024 // 64KB buffers
+	memoryConfig.MaxPoolSize = 100
 	memoryConfig.EnableMetrics = true
 
 	// 配置缓存
 	cacheConfig := DefaultCacheConfig()
 	cacheConfig.MaxSize = 10000
-	cacheConfig.DefaultTTL = 1 * time.Hour
+	cacheConfig.TTL = 1 * time.Hour
 	cacheConfig.EvictionPolicy = "lru"
 	cacheConfig.EnableMetrics = true
 
@@ -79,22 +79,22 @@ func NewPerformanceOptimizedApp() *PerformanceOptimizedApp {
 	networkConfig.UpdateInterval = 10 * time.Second
 	networkConfig.EnableMetrics = true
 
-	// 配置GC优化器
-	gcConfig := DefaultGCOptimizerConfig()
-	gcConfig.EnableAdaptive = true
-	gcConfig.TargetGCPercent = 100
-	gcConfig.EnableMetrics = true
+	// 配置GC优化器 (暂时注释，因为DefaultGCOptimizerConfig函数不存在)
+	// gcConfig := DefaultGCOptimizerConfig()
+	// gcConfig.EnableAdaptive = true
+	// gcConfig.TargetGCPercent = 100
+	// gcConfig.EnableMetrics = true
 
 	return &PerformanceOptimizedApp{
 		monitor:      NewPerformanceMonitor(monitorConfig),
 		workerPool:   NewWorkerPool(workerConfig),
-		rateLimiter:  NewRateLimiter(rateLimiterConfig),
+		// rateLimiter:  NewRateLimiter(rateLimiterConfig),  // 注释掉，因为rateLimiterConfig被注释了
 		memoryPool:   NewMemoryPool(memoryConfig),
 		cache:        NewCache(cacheConfig),
 		httpPool:     NewHTTPClientPool(httpConfig),
 		requestCache: NewRequestCache(requestCacheConfig),
 		netMonitor:   NewNetworkMonitor(networkConfig),
-		gcOptimizer:  NewGCOptimizer(gcConfig),
+		// gcOptimizer:  NewGCOptimizer(gcConfig),  // 注释掉，因为gcConfig被注释了
 	}
 }
 
