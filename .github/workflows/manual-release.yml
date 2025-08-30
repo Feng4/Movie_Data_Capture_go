@@ -1,16 +1,6 @@
-name: Build and Release
+name: Manual Release
 
 on:
-  push:
-    tags:
-      - 'v*'
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
   workflow_dispatch:
     inputs:
       version:
@@ -18,6 +8,11 @@ on:
         required: true
         default: 'v1.0.0'
         type: string
+      create_tag:
+        description: '是否创建Git标签'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   build:
@@ -92,25 +87,13 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Set version
-      id: version
-      run: |
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-        elif [ "${{ github.ref_type }}" == "tag" ]; then
-          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-        else
-          echo "VERSION=dev-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-        fi
-      shell: bash
-
     - name: Build binary
       env:
         GOOS: ${{ matrix.os }}
         GOARCH: ${{ matrix.arch }}
         CGO_ENABLED: 0
       run: |
-        go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
+        go build -ldflags="-s -w -X main.Version=${{ inputs.version }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
 
     - name: Prepare release package
       run: |
@@ -155,24 +138,32 @@ jobs:
         path: mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
         retention-days: 30
 
-  release:
-    name: Create Release
-    needs: build
+  create-tag:
+    name: Create Git Tag
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    
+    if: inputs.create_tag
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set version for release
-      id: version
+    - name: Create and push tag
       run: |
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-        else
-          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-        fi
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git tag ${{ inputs.version }}
+        git push origin ${{ inputs.version }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Create Release
+    needs: [build, create-tag]
+    runs-on: ubuntu-latest
+    if: always() && needs.build.result == 'success'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -190,10 +181,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.version.outputs.VERSION }}
-        release_name: Movie Data Capture Go ${{ steps.version.outputs.VERSION }}
+        tag_name: ${{ inputs.version }}
+        release_name: Movie Data Capture Go ${{ inputs.version }}
         body: |
-          ## 🚀 Movie Data Capture Go ${{ steps.version.outputs.VERSION }}
+          ## 🚀 Movie Data Capture Go ${{ inputs.version }}
           
           ### 📦 下载说明
           
@@ -222,9 +213,7 @@ jobs:
           
           ### 📝 更新内容
           
-          - 🐛 修复编译问题
-          - ✨ 优化构建流程
-          - 🔧 改进跨平台兼容性
+          手动发布版本，包含所有最新功能和修复。
           
           完整的更新日志请查看 [README.md](https://github.com/Feng4/movie-data-capture-go/blob/main/README.md)
         draft: false
@@ -238,7 +227,7 @@ jobs:
           for file in "$artifact_dir"*.{zip,tar.gz}; do
             if [ -f "$file" ]; then
               echo "Uploading: $file"
-              gh release upload ${{ steps.version.outputs.VERSION }} "$file" --clobber
+              gh release upload ${{ inputs.version }} "$file" --clobber
             fi
           done
         done
