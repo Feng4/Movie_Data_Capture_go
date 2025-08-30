@@ -14,6 +14,10 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     name: Build for ${{ matrix.os }} - ${{ matrix.arch }}
@@ -177,12 +181,10 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ inputs.version }}
-        release_name: Movie Data Capture Go ${{ inputs.version }}
+        name: Movie Data Capture Go ${{ inputs.version }}
         body: |
           ## 🚀 Movie Data Capture Go ${{ inputs.version }}
           
@@ -218,18 +220,7 @@ jobs:
           完整的更新日志请查看 [README.md](https://github.com/Feng4/movie-data-capture-go/blob/main/README.md)
         draft: false
         prerelease: false
-
-    - name: Upload Release Assets
-      run: |
-        echo "=== Uploading release assets ==="
-        for artifact_dir in ./artifacts/*/; do
-          echo "Processing directory: $artifact_dir"
-          for file in "$artifact_dir"*.{zip,tar.gz}; do
-            if [ -f "$file" ]; then
-              echo "Uploading: $file"
-              gh release upload ${{ inputs.version }} "$file" --clobber
-            fi
-          done
-        done
+        files: |
+          ./artifacts/*/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
