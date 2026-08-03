@@ -3,6 +3,7 @@ package imageprocessor
 import (
 	"image"
 	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -283,9 +284,6 @@ func TestImageProcessor_ColorSpaceConversion(t *testing.T) {
 
 // Helper function to save image as PNG (simplified)
 func saveImageAsPNG(file *os.File, img image.Image) error {
-	// This is a simplified PNG encoder for testing
-	// In a real implementation, you would use image/png package
-	// For now, we'll just write a minimal header to make the test pass
-	_, err := file.Write([]byte{137, 80, 78, 71, 13, 10, 26, 10}) // PNG signature
-	return err
+	// 必须写出完整合法的 PNG：仅写签名会让后续解码在读取数据块时报 unexpected EOF
+	return png.Encode(file, img)
 }

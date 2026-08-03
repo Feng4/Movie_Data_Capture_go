@@ -150,12 +150,27 @@ func (pm *PerformanceMonitor) GetMetrics() *Metrics {
 	pm.metrics.mu.RLock()
 	defer pm.metrics.mu.RUnlock()
 
-	// 创建副本以避免竞态条件
-	metricsCopy := *pm.metrics
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	metricsCopy := &Metrics{
+		MemoryUsage:     pm.metrics.MemoryUsage,
+		MemoryAllocated: pm.metrics.MemoryAllocated,
+		MemoryReleased:  pm.metrics.MemoryReleased,
+		GoroutineCount:  pm.metrics.GoroutineCount,
+		CPUUsage:        pm.metrics.CPUUsage,
+		GCCount:         pm.metrics.GCCount,
+		GCPauseTime:     pm.metrics.GCPauseTime,
+		NetworkRequests: pm.metrics.NetworkRequests,
+		NetworkErrors:   pm.metrics.NetworkErrors,
+		NetworkLatency:  pm.metrics.NetworkLatency,
+		Throughput:      pm.metrics.Throughput,
+		ErrorRate:       pm.metrics.ErrorRate,
+		Uptime:          pm.metrics.Uptime,
+		LastUpdated:     pm.metrics.LastUpdated,
+	}
 	metricsCopy.History = make([]MetricPoint, len(pm.metrics.History))
 	copy(metricsCopy.History, pm.metrics.History)
 
-	return &metricsCopy
+	return metricsCopy
 }
 
 // AddCallback 添加指标回调函数

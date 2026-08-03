@@ -64,7 +64,9 @@ func TestRetry_MaxAttemptsExceeded(t *testing.T) {
 	attempts := 0
 	fn := func() error {
 		attempts++
-		return errors.New("persistent failure")
+		// 必须是 DefaultRetryIf 认可的可重试错误，否则会在第 1 次尝试后
+		// 以"不可重试"提前返回，测不到最大尝试次数耗尽的路径
+		return errors.New("temporary failure")
 	}
 
 	config := &Config{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -332,8 +333,16 @@ func (mp *MemoryPool) GetStats() *MemoryPoolStats {
 	mp.stats.mu.RLock()
 	defer mp.stats.mu.RUnlock()
 
-	stats := *mp.stats
-	return &stats
+	// 逐字段构造副本：整体值拷贝会连带复制 sync.RWMutex，
+	// 使副本持有失效的锁状态（go vet copylocks）
+	return &MemoryPoolStats{
+		Allocations:   mp.stats.Allocations,
+		Deallocations: mp.stats.Deallocations,
+		Hits:          mp.stats.Hits,
+		Misses:        mp.stats.Misses,
+		TotalSize:     mp.stats.TotalSize,
+		ActiveBuffers: mp.stats.ActiveBuffers,
+	}
 }
 
 // Buffer 方法
@@ -643,8 +652,15 @@ func (c *Cache) GetStats() *CacheStats {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
 
-	stats := *c.stats
-	return &stats
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	return &CacheStats{
+		Hits:        c.stats.Hits,
+		Misses:      c.stats.Misses,
+		Evictions:   c.stats.Evictions,
+		Size:        c.stats.Size,
+		MemoryUsage: c.stats.MemoryUsage,
+		HitRatio:    c.stats.HitRatio,
+	}
 }
 
 // LRU 列表实现
@@ -730,7 +746,7 @@ func (gco *GCOptimizer) Start(ctx context.Context) error {
 	}
 
 	// 设置初始GC目标
-	runtime.SetGCPercent(gco.config.TargetPercent)
+	debug.SetGCPercent(gco.config.TargetPercent)
 	runtime.ReadMemStats(&gco.lastGCStats)
 	gco.lastOptimization = time.Now()
 
@@ -841,7 +857,7 @@ func (gco *GCOptimizer) adaptiveOptimize(memStats *runtime.MemStats) {
 		newTarget = 500
 	}
 
-	runtime.SetGCPercent(newTarget)
+	debug.SetGCPercent(newTarget)
 }
 
 // ForceGC 强制垃圾回收
@@ -855,6 +871,13 @@ func (gco *GCOptimizer) GetStats() *GCStats {
 	gco.stats.mu.RLock()
 	defer gco.stats.mu.RUnlock()
 
-	stats := *gco.stats
-	return &stats
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	return &GCStats{
+		GCCount:          gco.stats.GCCount,
+		TotalPauseTime:   gco.stats.TotalPauseTime,
+		AveragePauseTime: gco.stats.AveragePauseTime,
+		LastGCTime:       gco.stats.LastGCTime,
+		MemoryFreed:      gco.stats.MemoryFreed,
+		Optimizations:    gco.stats.Optimizations,
+	}
 }

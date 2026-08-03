@@ -22,6 +22,7 @@ func TestRecoveryManager_CreateProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建一个进程
 	process := rm.CreateProcess("test-process-1", "Test Process", 5)
@@ -58,6 +59,7 @@ func TestRecoveryManager_UpdateProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建并更新一个进程
 	_ = rm.CreateProcess("test-process-2", "Test Process 2", 3)
@@ -104,6 +106,7 @@ func TestRecoveryManager_CreateCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建一个进程和检查点
 	_ = rm.CreateProcess("test-process-3", "Test Process 3", 2)
@@ -396,6 +399,7 @@ func TestRecoveryManager_RecoverProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建一个进程
 	_ = rm.CreateProcess("test-process-5", "Test Process 5", 3)
@@ -435,6 +439,7 @@ func TestRecoveryManager_GetRecoveryStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建不同状态的进程
 	rm.CreateProcess("pending-1", "Pending Process", 3)
@@ -502,6 +507,7 @@ func TestRecoveryManager_CleanupOldStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建旧的已完成进程
 	_ = rm.CreateProcess("old-completed", "Old Completed Process", 3)
@@ -547,6 +553,7 @@ func BenchmarkRecoveryManager_CreateProcess(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -567,6 +574,7 @@ func BenchmarkRecoveryManager_UpdateProcess(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	defer rm.Close()
 
 	// 创建用于基准测试的进程
 	rm.CreateProcess("bench-process", "Benchmark Process", 100)

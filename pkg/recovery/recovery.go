@@ -19,6 +19,10 @@ type RecoveryManager struct {
 	strategies    map[string]RecoveryStrategy
 	processStates map[string]*ProcessState
 	config        *RecoveryConfig
+	// fileMu 串行化状态文件与备份的磁盘写入，独立于保护 processStates 的 mu
+	fileMu sync.Mutex
+	// saveWg 追踪 saveStateAsync 派生的协程，供 Close 等待其收敛
+	saveWg sync.WaitGroup
 }
 
 // RecoveryConfig 保存恢复配置
@@ -127,6 +131,23 @@ func DefaultRecoveryConfig() *RecoveryConfig {
 func NewRecoveryManager(config *RecoveryConfig) (*RecoveryManager, error) {
 	if config == nil {
 		config = DefaultRecoveryConfig()
+	}
+
+	// 归一化零值字段：调用方通常只设置部分选项，未设置的字段若直接使用零值
+	// 会导致异常行为（RecoveryTimeout=0 使上下文立即超时，
+	// MaxBackups=0 使备份清理删除全部备份）。
+	defaults := DefaultRecoveryConfig()
+	if config.SaveInterval <= 0 {
+		config.SaveInterval = defaults.SaveInterval
+	}
+	if config.MaxBackups <= 0 {
+		config.MaxBackups = defaults.MaxBackups
+	}
+	if config.RecoveryTimeout <= 0 {
+		config.RecoveryTimeout = defaults.RecoveryTimeout
+	}
+	if config.MaxStateAge <= 0 {
+		config.MaxStateAge = defaults.MaxStateAge
 	}
 
 	rm := &RecoveryManager{
@@ -313,12 +334,23 @@ func (rm *RecoveryManager) SaveState() error {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
+	return rm.saveStateLocked()
+}
+
+// saveStateLocked 执行实际的保存动作，调用方必须已持有 rm.mu（读锁或写锁）。
+// sync.RWMutex 不可重入：已持写锁的调用方必须用本函数而不是 SaveState，
+// 否则会自死锁。
+func (rm *RecoveryManager) saveStateLocked() error {
 	data, err := json.MarshalIndent(rm.processStates, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	// 保存前创建备份
+	// 保存前创建备份。fileMu 串行化磁盘写入：SaveState 只持读锁，
+	// 多个 saveStateAsync 协程可并发进入，需独立互斥量避免争用同一备份文件。
+	rm.fileMu.Lock()
+	defer rm.fileMu.Unlock()
+
 	if err := rm.createBackup(); err != nil {
 		return fmt.Errorf("failed to create backup: %w", err)
 	}
@@ -398,7 +430,8 @@ func (rm *RecoveryManager) cleanupOldBackups() error {
 	filesToRemove := len(files) - rm.config.MaxBackups
 	for i := 0; i < filesToRemove; i++ {
 		filePath := filepath.Join(rm.backupDir, files[i].Name())
-		if err := os.Remove(filePath); err != nil {
+		// 文件已被其他清理动作删除时视为成功：目标是"该文件不存在"
+		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -408,12 +441,21 @@ func (rm *RecoveryManager) cleanupOldBackups() error {
 
 // saveStateAsync 异步保存状态
 func (rm *RecoveryManager) saveStateAsync() {
+	rm.saveWg.Add(1)
 	go func() {
+		defer rm.saveWg.Done()
 		if err := rm.SaveState(); err != nil {
 			// 记录错误（在实际实现中，使用适当的日志记录）
 			fmt.Printf("Failed to save state: %v\n", err)
 		}
 	}()
+}
+
+// Close 等待所有后台状态保存完成，并执行最后一次同步保存。
+// 调用方应在结束使用管理器前调用，以免异步写入在目标目录被清理后才执行。
+func (rm *RecoveryManager) Close() error {
+	rm.saveWg.Wait()
+	return rm.SaveState()
 }
 
 // calculateCheckpointHash 计算检查点数据的哈希值
@@ -470,7 +512,8 @@ func (rm *RecoveryManager) CleanupOldStates() error {
 		}
 	}
 
-	return rm.SaveState()
+	// 此处已持有写锁，必须调用 saveStateLocked 而非 SaveState，否则自死锁
+	return rm.saveStateLocked()
 }
 
 // GetRecoveryStats 返回恢复统计信息
