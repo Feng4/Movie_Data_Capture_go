@@ -27,6 +27,10 @@ vendor/
 *.log
 logs/
 
+# 刮削输出与失败目录（由 config.yaml 的 success/failed_output_folder 决定）
+JAV_output/
+failed/
+
 # 本地配置（config_template.yaml 为模板，保留）
 config.local.yaml
 
