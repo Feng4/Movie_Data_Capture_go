@@ -57,26 +57,66 @@ func (s *Scraper) scrapeXCity(ctx context.Context, number string) (*MovieData, e
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 	
-	// 查找详情页面链接
-	var detailURL string
-	doc.Find("a[href*='/avod/detail/']").Each(func(i int, s *goquery.Selection) {
-		if href, exists := s.Attr("href"); exists {
-			if strings.Contains(href, "/avod/detail/") {
+	// 查找与番号相符的详情页链接。
+	// 站点没有该番号时，搜索页仍会返回推荐位等无关条目，
+	// 若不加校验直接取用就会抓到完全无关的作品，故此处按番号筛选。
+	detailURL := findXCityDetailURL(doc, number)
+	if detailURL == "" {
+		return nil, fmt.Errorf("no matching detail page found for number: %s", number)
+	}
+
+	data, err := s.scrapeXCityPage(ctx, detailURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// 详情页番号与请求不符时拒绝，避免把无关作品的元数据写入文件
+	if data != nil && data.Number != "" && !isSameNumber(number, data.Number) {
+		return nil, fmt.Errorf("xcity returned a different work: requested=%s got=%s", number, data.Number)
+	}
+
+	return data, nil
+}
+
+// findXCityDetailURL 在搜索结果中挑出番号相符的详情页地址。
+// 比对时同时考察链接文本、图片 alt/src 与链接自身，因为不同版式下
+// 番号出现的位置不一致。
+func findXCityDetailURL(doc *goquery.Document, number string) string {
+	target := normalizeNumberForCompare(number)
+	if target == "" {
+		return ""
+	}
+
+	var matched string
+	doc.Find("a[href*='/avod/detail/']").EachWithBreak(func(_ int, sel *goquery.Selection) bool {
+		href, exists := sel.Attr("href")
+		if !exists {
+			return true
+		}
+
+		// 收集可能承载番号的文本：链接文字、内部 img 的 alt/src、以及 href 本身
+		haystacks := []string{sel.Text(), href}
+		if alt, ok := sel.Find("img").First().Attr("alt"); ok {
+			haystacks = append(haystacks, alt)
+		}
+		if src, ok := sel.Find("img").First().Attr("src"); ok {
+			haystacks = append(haystacks, src)
+		}
+
+		for _, h := range haystacks {
+			if strings.Contains(normalizeNumberForCompare(h), target) {
 				if strings.HasPrefix(href, "/") {
-					detailURL = "https://xcity.jp" + href
+					matched = "https://xcity.jp" + href
 				} else {
-					detailURL = href
+					matched = href
 				}
-				return
+				return false // 命中即停止遍历
 			}
 		}
+		return true
 	})
-	
-	if detailURL == "" {
-		return nil, fmt.Errorf("no detail page found for number: %s", number)
-	}
-	
-	return s.scrapeXCityPage(ctx, detailURL)
+
+	return matched
 }
 
 // scrapeXCityPage 抓取特定的XCity详情页面
@@ -127,9 +167,9 @@ func (s *Scraper) scrapeXCityPage(ctx context.Context, url string) (*MovieData, 
 		movieData.Title = strings.TrimSpace(title)
 	}
 	
-	// 提取封面
+	// 提取封面。站点返回协议相对地址（//faws.xcity.jp/...），需补全协议否则下载失败
 	if cover, exists := doc.Find("#avodDetails div.frame p a").Attr("href"); exists {
-		movieData.Cover = cover
+		movieData.Cover = normalizeXCityURL(cover)
 	}
 	
 	// 提取演员
@@ -159,10 +199,13 @@ func (s *Scraper) scrapeXCityPage(ctx context.Context, url string) (*MovieData, 
 		}
 	}
 	
-	// 提取发布日期
+	// 提取发布日期。该 <li> 内混有「発売日」标签与「メーカー品番」等文本，
+	// 直接取整块会污染字段，故用正则抽出 YYYY-MM-DD / YYYY/MM/DD 形式的日期。
 	if release := doc.Find("#avodDetails ul li:nth-child(2)").Text(); release != "" {
-		movieData.Release = strings.TrimSpace(release)
-		movieData.Year = extractYear(release)
+		if date := extractDate(release); date != "" {
+			movieData.Release = date
+			movieData.Year = extractYear(date)
+		}
 	}
 	
 	// 提取标签

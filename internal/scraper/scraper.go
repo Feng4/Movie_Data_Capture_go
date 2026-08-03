@@ -94,10 +94,14 @@ func (s *Scraper) GetDataFromNumber(number, specifiedSource, specifiedURL string
 				continue
 			}
 
-			// 检查番号是否匹配（不区分大小写）
-			if !strings.EqualFold(data.Number, number) {
-				logger.Warn("Number mismatch: requested=%s, got=%s from %s", number, data.Number, source)
-				// 某些来源可能会规范化番号，所以我们可能允许这种情况
+			// 校验番号是否为同一作品。
+			// 站点常对番号做规范化（大小写、分隔符、四位补零），故按归一化后比对；
+			// 若归一化后仍不同，说明该源返回的是无关作品（例如站点无此番号时
+			// 返回了推荐位内容），必须丢弃并继续尝试下一个源，否则会写入错误元数据。
+			if !isSameNumber(number, data.Number) {
+				logger.Warn("Discarding result from %s: requested=%s but got=%s (different work)",
+					source, number, data.Number)
+				continue
 			}
 
 			// 处理数据
@@ -162,6 +166,8 @@ func (s *Scraper) scrapeFromSource(ctx context.Context, source, number, specifie
 		return scrapeFreeJavBT(number)
 	case "madou", "md":
 		return s.scrapeMadou(ctx, number)
+	case "madouqu", "mdq":
+		return s.scrapeMadouQu(ctx, number)
 	default:
 		return nil, fmt.Errorf("unsupported source: %s", source)
 	}
