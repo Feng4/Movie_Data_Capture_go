@@ -472,9 +472,18 @@ func (hcp *HTTPClientPool) GetStats() *HTTPClientPoolStats {
 	hcp.stats.mu.RLock()
 	defer hcp.stats.mu.RUnlock()
 
-	stats := *hcp.stats
-	stats.ActiveClients = len(hcp.clients)
-	return &stats
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	return &HTTPClientPoolStats{
+		TotalRequests:      hcp.stats.TotalRequests,
+		SuccessRequests:    hcp.stats.SuccessRequests,
+		FailedRequests:     hcp.stats.FailedRequests,
+		TotalLatency:       hcp.stats.TotalLatency,
+		AverageLatency:     hcp.stats.AverageLatency,
+		ConnectionsCreated: hcp.stats.ConnectionsCreated,
+		ConnectionsReused:  hcp.stats.ConnectionsReused,
+		LastUpdated:        hcp.stats.LastUpdated,
+		ActiveClients:      len(hcp.clients),
+	}
 }
 
 // 请求缓存实现
@@ -695,8 +704,17 @@ func (rc *RequestCache) GetStats() *RequestCacheStats {
 	rc.stats.mu.RLock()
 	defer rc.stats.mu.RUnlock()
 
-	stats := *rc.stats
-	return &stats
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	return &RequestCacheStats{
+		Hits:        rc.stats.Hits,
+		Misses:      rc.stats.Misses,
+		Stores:      rc.stats.Stores,
+		Evictions:   rc.stats.Evictions,
+		Size:        rc.stats.Size,
+		MemoryUsage: rc.stats.MemoryUsage,
+		HitRatio:    rc.stats.HitRatio,
+		LastUpdated: rc.stats.LastUpdated,
+	}
 }
 
 // 网络监控器实现
@@ -859,11 +877,23 @@ func (nm *NetworkMonitor) GetMetrics() *NetworkMetrics {
 	nm.metrics.mu.RLock()
 	defer nm.metrics.mu.RUnlock()
 
-	metrics := *nm.metrics
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	metrics := &NetworkMetrics{
+		Latency:           nm.metrics.Latency,
+		Throughput:        nm.metrics.Throughput,
+		PacketLoss:        nm.metrics.PacketLoss,
+		ConnectionErrors:  nm.metrics.ConnectionErrors,
+		TimeoutErrors:     nm.metrics.TimeoutErrors,
+		DNSResolutionTime: nm.metrics.DNSResolutionTime,
+		TCPConnectTime:    nm.metrics.TCPConnectTime,
+		TLSHandshakeTime:  nm.metrics.TLSHandshakeTime,
+		FirstByteTime:     nm.metrics.FirstByteTime,
+		LastUpdated:       nm.metrics.LastUpdated,
+	}
 	metrics.LatencyHistory = make([]time.Duration, len(nm.metrics.LatencyHistory))
 	copy(metrics.LatencyHistory, nm.metrics.LatencyHistory)
 
-	return &metrics
+	return metrics
 }
 
 // 辅助函数

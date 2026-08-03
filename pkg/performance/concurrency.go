@@ -224,17 +224,21 @@ func (wp *WorkerPool) Stop() {
 
 	close(wp.stopCh)
 
+	// 必须先通知工作者退出，再等待它们收敛。
+	// 反序会死锁：worker.run 只在 ctx 取消或 stopCh 关闭时返回，
+	// 若先 wg.Wait() 则永远等不到退出信号。
+	wp.mu.Lock()
+	for _, worker := range wp.workers {
+		if atomic.CompareAndSwapInt32(&worker.running, 1, 0) {
+			close(worker.stopCh)
+		}
+	}
+	wp.mu.Unlock()
+
 	if wp.config.GracefulStop {
 		// 等待所有作业完成
 		wp.wg.Wait()
 	}
-
-	wp.mu.Lock()
-	for _, worker := range wp.workers {
-		atomic.StoreInt32(&worker.running, 0)
-		close(worker.stopCh)
-	}
-	wp.mu.Unlock()
 }
 
 // Submit 向工作池提交作业
@@ -267,11 +271,19 @@ func (wp *WorkerPool) GetStats() *PoolStats {
 	wp.stats.mu.RLock()
 	defer wp.stats.mu.RUnlock()
 
-	stats := *wp.stats
-	stats.QueueLength = len(wp.jobQueue)
-	stats.ActiveWorkers = len(wp.workers)
-
-	return &stats
+	// 逐字段构造副本，避免连带复制 sync.RWMutex
+	return &PoolStats{
+		JobsSubmitted:   wp.stats.JobsSubmitted,
+		JobsCompleted:   wp.stats.JobsCompleted,
+		JobsFailed:      wp.stats.JobsFailed,
+		JobsRetried:     wp.stats.JobsRetried,
+		TotalDuration:   wp.stats.TotalDuration,
+		AverageDuration: wp.stats.AverageDuration,
+		Throughput:      wp.stats.Throughput,
+		LastUpdated:     wp.stats.LastUpdated,
+		QueueLength:     len(wp.jobQueue),
+		ActiveWorkers:   len(wp.workers),
+	}
 }
 
 // createWorker 创建一个新的工作者

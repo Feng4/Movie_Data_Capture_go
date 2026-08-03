@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -33,7 +32,10 @@ func TestPerformanceMonitor_Start(t *testing.T) {
 }
 
 func TestPerformanceMonitor_Metrics(t *testing.T) {
-	monitor := NewPerformanceMonitor(nil)
+	config := DefaultMonitorConfig()
+	config.UpdateInterval = 10 * time.Millisecond
+	monitor := NewPerformanceMonitor(config)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -43,12 +45,14 @@ func TestPerformanceMonitor_Metrics(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// 等待收集一些指标
-	time.Sleep(100 * time.Millisecond)
+	// 等待至少一个采集周期完成
+	waitFor(t, time.Second, func() bool {
+		return monitor.GetMetrics().MemoryUsage > 0
+	}, "metrics to be collected")
 
 	metrics := monitor.GetMetrics()
 	if metrics == nil {
-		t.Error("Expected metrics, got nil")
+		t.Fatal("Expected metrics, got nil")
 	}
 
 	if metrics.MemoryUsage == 0 {
@@ -61,7 +65,10 @@ func TestPerformanceMonitor_Metrics(t *testing.T) {
 }
 
 func TestPerformanceMonitor_Callbacks(t *testing.T) {
-	monitor := NewPerformanceMonitor(nil)
+	config := DefaultMonitorConfig()
+	config.UpdateInterval = 10 * time.Millisecond
+	monitor := NewPerformanceMonitor(config)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -80,29 +87,20 @@ func TestPerformanceMonitor_Callbacks(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// 等待回调被调用
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	if !callbackCalled {
-		t.Error("Expected callback to be called")
-	}
-	mu.Unlock()
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return callbackCalled
+	}, "callback to be called")
 }
 
+// TestPerformanceMonitor_Alerts 验证阈值越界时能读到警报。
+// 监控器不提供警报回调，警报通过 GetAlerts 轮询获取。
 func TestPerformanceMonitor_Alerts(t *testing.T) {
 	config := DefaultMonitorConfig()
-	config.MemoryThreshold = 1 // 非常低的阈值以触发警报
+	config.UpdateInterval = 10 * time.Millisecond
+	config.MemoryThreshold = 1 // 极低阈值以必然触发警报
 	monitor := NewPerformanceMonitor(config)
-
-	alertTriggered := false
-	var mu sync.Mutex
-
-	monitor.AddAlertCallback(func(alert *Alert) {
-		mu.Lock()
-		alertTriggered = true
-		mu.Unlock()
-	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,14 +111,49 @@ func TestPerformanceMonitor_Alerts(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// 等待警报被触发
-	time.Sleep(200 * time.Millisecond)
+	// 等待指标采集后警报出现
+	waitFor(t, time.Second, func() bool {
+		return len(monitor.GetAlerts()) > 0
+	}, "alert to be triggered")
 
-	mu.Lock()
-	if !alertTriggered {
-		t.Error("Expected alert to be triggered")
+	var found bool
+	for _, alert := range monitor.GetAlerts() {
+		if alert.Metric == "memory_usage" {
+			found = true
+			if alert.Level != AlertLevelWarning {
+				t.Errorf("Expected warning level for memory alert, got %v", alert.Level)
+			}
+		}
 	}
-	mu.Unlock()
+
+	if !found {
+		t.Error("Expected a memory_usage alert")
+	}
+}
+
+// TestPerformanceMonitor_AlertsDisabled 验证关闭警报后不再产生警报
+func TestPerformanceMonitor_AlertsDisabled(t *testing.T) {
+	config := DefaultMonitorConfig()
+	config.UpdateInterval = 10 * time.Millisecond
+	config.MemoryThreshold = 1
+	config.AlertEnabled = false
+	monitor := NewPerformanceMonitor(config)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := monitor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start monitor: %v", err)
+	}
+	defer monitor.Stop()
+
+	waitFor(t, time.Second, func() bool {
+		return monitor.GetMetrics().MemoryUsage > 0
+	}, "metrics to be collected")
+
+	if alerts := monitor.GetAlerts(); len(alerts) != 0 {
+		t.Errorf("Expected no alerts when disabled, got %d", len(alerts))
+	}
 }
 
 // 工作池测试
@@ -140,28 +173,31 @@ func TestWorkerPool_Basic(t *testing.T) {
 	}
 	defer pool.Stop()
 
-	// 提交一个任务
-	taskDone := make(chan bool)
-	task := func() interface{} {
-		taskDone <- true
-		return "result"
+	job := Job{
+		ID: "job-1",
+		Handler: func(ctx context.Context, data interface{}) (interface{}, error) {
+			return "result", nil
+		},
 	}
 
-	err = pool.Submit(task)
-	if err != nil {
-		t.Fatalf("Failed to submit task: %v", err)
+	if err := pool.Submit(job); err != nil {
+		t.Fatalf("Failed to submit job: %v", err)
 	}
 
-	// 等待任务完成
 	select {
-	case <-taskDone:
-		// 任务成功完成
-	case <-time.After(1 * time.Second):
-		t.Error("Task did not complete within timeout")
+	case res := <-pool.GetResult():
+		if res.Error != nil {
+			t.Errorf("Expected no error, got: %v", res.Error)
+		}
+		if res.Result != "result" {
+			t.Errorf("Expected 'result', got %v", res.Result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Job did not complete within timeout")
 	}
 }
 
-func TestWorkerPool_MultipleTasksWithResults(t *testing.T) {
+func TestWorkerPool_MultipleJobsWithResults(t *testing.T) {
 	config := DefaultWorkerPoolConfig()
 	config.WorkerCount = 3
 	config.QueueSize = 10
@@ -176,123 +212,165 @@ func TestWorkerPool_MultipleTasksWithResults(t *testing.T) {
 	}
 	defer pool.Stop()
 
-	numTasks := 5
-	results := make([]interface{}, numTasks)
-	var wg sync.WaitGroup
-
-	for i := 0; i < numTasks; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			task := func() interface{} {
-				return fmt.Sprintf("result-%d", index)
-			}
-
-			result, err := pool.SubmitWithResult(task, 1*time.Second)
-			if err != nil {
-				t.Errorf("Failed to submit task %d: %v", index, err)
-				return
-			}
-			results[index] = result
-		}(i)
+	numJobs := 5
+	for i := 0; i < numJobs; i++ {
+		index := i
+		job := Job{
+			ID: fmt.Sprintf("job-%d", index),
+			Handler: func(ctx context.Context, data interface{}) (interface{}, error) {
+				return fmt.Sprintf("result-%d", index), nil
+			},
+		}
+		if err := pool.Submit(job); err != nil {
+			t.Fatalf("Failed to submit job %d: %v", index, err)
+		}
 	}
 
-	wg.Wait()
+	// 结果顺序不保证，按 JobID 收集后比对
+	got := make(map[string]interface{}, numJobs)
+	deadline := time.After(3 * time.Second)
+	for len(got) < numJobs {
+		select {
+		case res := <-pool.GetResult():
+			if res.Error != nil {
+				t.Errorf("Job %s failed: %v", res.JobID, res.Error)
+			}
+			got[res.JobID] = res.Result
+		case <-deadline:
+			t.Fatalf("Only received %d of %d results before timeout", len(got), numJobs)
+		}
+	}
 
-	// 验证所有结果
-	for i, result := range results {
+	for i := 0; i < numJobs; i++ {
+		key := fmt.Sprintf("job-%d", i)
 		expected := fmt.Sprintf("result-%d", i)
-		if result != expected {
-			t.Errorf("Expected result %s, got %v", expected, result)
+		if got[key] != expected {
+			t.Errorf("Expected %s for %s, got %v", expected, key, got[key])
 		}
 	}
 }
 
-func TestWorkerPool_AutoScaling(t *testing.T) {
+func TestWorkerPool_SubmitBeforeStart(t *testing.T) {
+	pool := NewWorkerPool(DefaultWorkerPoolConfig())
+
+	job := Job{
+		ID: "job-before-start",
+		Handler: func(ctx context.Context, data interface{}) (interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	if err := pool.Submit(job); err == nil {
+		t.Error("Expected error when submitting to a pool that is not running")
+	}
+}
+
+func TestWorkerPool_Stats(t *testing.T) {
 	config := DefaultWorkerPoolConfig()
-	config.WorkerCount = 1
-	config.MaxWorkers = 3
-	config.EnableAutoScaling = true
-	config.ScaleUpThreshold = 1
-	config.ScaleDownThreshold = 0
+	config.WorkerCount = 2
+	config.QueueSize = 10
 
 	pool := NewWorkerPool(config)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := pool.Start(ctx)
-	if err != nil {
+	if err := pool.Start(ctx); err != nil {
 		t.Fatalf("Failed to start worker pool: %v", err)
 	}
 	defer pool.Stop()
 
-	// 提交多个任务以触发扩容
-	for i := 0; i < 5; i++ {
-		task := func() interface{} {
-			time.Sleep(100 * time.Millisecond)
-			return "done"
-		}
-		pool.Submit(task)
+	job := Job{
+		ID: "stats-job",
+		Handler: func(ctx context.Context, data interface{}) (interface{}, error) {
+			return "done", nil
+		},
+	}
+	if err := pool.Submit(job); err != nil {
+		t.Fatalf("Failed to submit job: %v", err)
 	}
 
-	// 等待自动扩容发生
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-pool.GetResult():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Job did not complete within timeout")
+	}
 
 	stats := pool.GetStats()
-	if stats.ActiveWorkers <= 1 {
-		t.Error("Expected worker pool to scale up")
+	if stats.JobsSubmitted == 0 {
+		t.Error("Expected at least one submitted job in stats")
 	}
 }
 
 // 速率限制器测试
 
 func TestRateLimiter_Basic(t *testing.T) {
-	config := DefaultRateLimiterConfig()
-	config.Rate = 10 // 每秒10个请求
-	config.Burst = 5
-
-	limiter := NewRateLimiter(config)
+	// 容量 5，每 100ms 补充一个令牌
+	limiter := NewRateLimiter(5, 100*time.Millisecond)
 
 	// 应该允许初始突发
-	for i := 0; i < config.Burst; i++ {
+	for i := 0; i < 5; i++ {
 		if !limiter.Allow() {
 			t.Errorf("Expected request %d to be allowed", i)
 		}
 	}
 
-	// 应该拒绝下一个请求（突发已耗尽）
+	// 令牌耗尽后应被拒绝
 	if limiter.Allow() {
 		t.Error("Expected request to be denied after burst")
 	}
 }
 
-func TestRateLimiter_Wait(t *testing.T) {
-	config := DefaultRateLimiterConfig()
-	config.Rate = 100 // 高速率以加快测试
-	config.Burst = 1
+func TestRateLimiter_Refill(t *testing.T) {
+	limiter := NewRateLimiter(1, 20*time.Millisecond)
 
-	limiter := NewRateLimiter(config)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	if !limiter.Allow() {
+		t.Fatal("Expected first request to be allowed")
+	}
+	if limiter.Allow() {
+		t.Fatal("Expected second request to be denied")
+	}
+
+	// 等待补充后应重新放行
+	waitFor(t, time.Second, limiter.Allow, "rate limiter to refill")
+}
+
+func TestRateLimiter_Wait(t *testing.T) {
+	limiter := NewRateLimiter(1, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// 第一个请求应该是立即的
+	// 第一个请求应立即通过
 	start := time.Now()
-	err := limiter.Wait(ctx)
-	if err != nil {
+	if err := limiter.Wait(ctx); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if time.Since(start) > 10*time.Millisecond {
-		t.Error("First request should be immediate")
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("First request should be immediate, took %v", elapsed)
 	}
 
-	// 第二个请求应该等待
+	// 第二个请求需等待补充
 	start = time.Now()
-	err = limiter.Wait(ctx)
-	if err != nil {
+	if err := limiter.Wait(ctx); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if time.Since(start) < 5*time.Millisecond {
-		t.Error("Second request should wait")
+	if elapsed := time.Since(start); elapsed < 10*time.Millisecond {
+		t.Errorf("Second request should wait for refill, took %v", elapsed)
+	}
+}
+
+func TestRateLimiter_WaitCancelled(t *testing.T) {
+	limiter := NewRateLimiter(1, 10*time.Second)
+
+	if !limiter.Allow() {
+		t.Fatal("Expected first request to be allowed")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	if err := limiter.Wait(ctx); err == nil {
+		t.Error("Expected context error when waiting past deadline")
 	}
 }
 
@@ -301,7 +379,6 @@ func TestRateLimiter_Wait(t *testing.T) {
 func TestSemaphore_Basic(t *testing.T) {
 	sem := NewSemaphore(2)
 
-	// 应该成功获取
 	if !sem.TryAcquire() {
 		t.Error("Expected to acquire semaphore")
 	}
@@ -310,12 +387,16 @@ func TestSemaphore_Basic(t *testing.T) {
 		t.Error("Expected to acquire semaphore")
 	}
 
-	// 应该获取失败（达到限制）
+	// 达到容量上限后应失败
 	if sem.TryAcquire() {
 		t.Error("Expected to fail acquiring semaphore")
 	}
 
-	// 释放并重试
+	if avail := sem.Available(); avail != 0 {
+		t.Errorf("Expected 0 available permits, got %d", avail)
+	}
+
+	// 释放后可再次获取
 	sem.Release()
 	if !sem.TryAcquire() {
 		t.Error("Expected to acquire semaphore after release")
@@ -324,65 +405,127 @@ func TestSemaphore_Basic(t *testing.T) {
 
 func TestSemaphore_Acquire(t *testing.T) {
 	sem := NewSemaphore(1)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// 第一次获取应该成功
-	err := sem.Acquire(ctx)
-	if err != nil {
+	if err := sem.Acquire(ctx); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// 第二次获取应该超时
+	// 容量已满，第二次获取应超时
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel2()
 
-	err = sem.Acquire(ctx2)
-	if err == nil {
+	if err := sem.Acquire(ctx2); err == nil {
 		t.Error("Expected timeout error")
+	}
+}
+
+// 熔断器测试
+
+func TestCircuitBreaker(t *testing.T) {
+	config := &CircuitBreakerConfig{
+		FailureThreshold: 3,
+		RecoveryTimeout:  100 * time.Millisecond,
+		SuccessThreshold: 1,
+		Timeout:          time.Second,
+	}
+	cb := NewCircuitBreaker("test", config)
+	ctx := context.Background()
+
+	if state := cb.GetState(); state != CircuitClosed {
+		t.Errorf("Expected initial state to be closed, got %v", state)
+	}
+
+	// 成功执行
+	if _, err := cb.Execute(ctx, func() (interface{}, error) {
+		return "ok", nil
+	}); err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// 连续失败以打开电路
+	for i := uint64(0); i < config.FailureThreshold; i++ {
+		_, _ = cb.Execute(ctx, func() (interface{}, error) {
+			return nil, fmt.Errorf("failure")
+		})
+	}
+
+	if state := cb.GetState(); state != CircuitOpen {
+		t.Errorf("Expected state to be open after failures, got %v", state)
+	}
+
+	// 开路状态应直接拒绝
+	if _, err := cb.Execute(ctx, func() (interface{}, error) {
+		return "ok", nil
+	}); err == nil {
+		t.Error("Expected circuit breaker to prevent execution when open")
+	}
+
+	// 等待恢复超时后成功执行应重新闭合
+	waitFor(t, 2*time.Second, func() bool {
+		_, err := cb.Execute(ctx, func() (interface{}, error) {
+			return "ok", nil
+		})
+		return err == nil
+	}, "circuit breaker to allow execution after recovery timeout")
+
+	if state := cb.GetState(); state != CircuitClosed {
+		t.Errorf("Expected state to be closed after successful execution, got %v", state)
 	}
 }
 
 // 内存池测试
 
 func TestMemoryPool_Basic(t *testing.T) {
-	config := DefaultMemoryPoolConfig()
-	config.BufferSize = 1024
-	config.MaxBuffers = 10
+	pool := NewMemoryPool(DefaultMemoryPoolConfig())
 
-	pool := NewMemoryPool(config)
-
-	// 获取缓冲区
-	buf := pool.Get()
+	buf := pool.Get(1024)
 	if buf == nil {
-		t.Error("Expected buffer, got nil")
+		t.Fatal("Expected buffer, got nil")
 	}
 
-	if len(buf) != config.BufferSize {
-		t.Errorf("Expected buffer size %d, got %d", config.BufferSize, len(buf))
+	if buf.Len() < 1024 {
+		t.Errorf("Expected buffer of at least 1024 bytes, got %d", buf.Len())
 	}
 
-	// 将缓冲区放回
+	if len(buf.Data()) < 1024 {
+		t.Errorf("Expected data slice of at least 1024 bytes, got %d", len(buf.Data()))
+	}
+
+	// 归还后再次获取（应复用）
 	pool.Put(buf)
 
-	// 再次获取缓冲区（应该重用）
-	buf2 := pool.Get()
+	buf2 := pool.Get(1024)
 	if buf2 == nil {
-		t.Error("Expected buffer, got nil")
+		t.Fatal("Expected buffer, got nil")
 	}
+	pool.Put(buf2)
 
 	stats := pool.GetStats()
-	if stats.BuffersCreated == 0 {
-		t.Error("Expected at least one buffer to be created")
+	if stats.Allocations == 0 && stats.Hits == 0 {
+		t.Error("Expected pool activity to be recorded in stats")
 	}
 }
 
-func TestMemoryPool_Concurrent(t *testing.T) {
-	config := DefaultMemoryPoolConfig()
-	config.BufferSize = 512
-	config.MaxBuffers = 5
+func TestMemoryPool_OversizedAllocation(t *testing.T) {
+	pool := NewMemoryPool(DefaultMemoryPoolConfig())
 
-	pool := NewMemoryPool(config)
+	// 超出所有池档位的尺寸走直接分配路径
+	huge := 64 * 1024 * 1024
+	buf := pool.Get(huge)
+	if buf == nil {
+		t.Fatal("Expected buffer for oversized request, got nil")
+	}
+	if buf.Len() != huge {
+		t.Errorf("Expected buffer of %d bytes, got %d", huge, buf.Len())
+	}
+	pool.Put(buf)
+}
+
+func TestMemoryPool_Concurrent(t *testing.T) {
+	pool := NewMemoryPool(DefaultMemoryPoolConfig())
 
 	var wg sync.WaitGroup
 	numGoroutines := 10
@@ -391,7 +534,7 @@ func TestMemoryPool_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			buf := pool.Get()
+			buf := pool.Get(512)
 			if buf == nil {
 				t.Error("Expected buffer, got nil")
 				return
@@ -404,8 +547,9 @@ func TestMemoryPool_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	stats := pool.GetStats()
-	if stats.BuffersCreated > config.MaxBuffers {
-		t.Errorf("Created more buffers (%d) than max allowed (%d)", stats.BuffersCreated, config.MaxBuffers)
+	total := stats.Allocations + stats.Hits
+	if total < uint64(numGoroutines) {
+		t.Errorf("Expected at least %d pool operations, got %d", numGoroutines, total)
 	}
 }
 
@@ -414,12 +558,10 @@ func TestMemoryPool_Concurrent(t *testing.T) {
 func TestCache_Basic(t *testing.T) {
 	config := DefaultCacheConfig()
 	config.MaxSize = 10
-	config.DefaultTTL = 1 * time.Hour
 
 	cache := NewCache(config)
 
-	// 设置和获取
-	cache.Set("key1", "value1", 0)
+	cache.Set("key1", "value1")
 	value, exists := cache.Get("key1")
 	if !exists {
 		t.Error("Expected key to exist")
@@ -428,87 +570,61 @@ func TestCache_Basic(t *testing.T) {
 		t.Errorf("Expected value1, got %v", value)
 	}
 
-	// 不存在的键
-	_, exists = cache.Get("nonexistent")
-	if exists {
+	if _, exists = cache.Get("nonexistent"); exists {
 		t.Error("Expected key to not exist")
+	}
+
+	cache.Delete("key1")
+	if _, exists = cache.Get("key1"); exists {
+		t.Error("Expected key to be deleted")
 	}
 }
 
 func TestCache_TTL(t *testing.T) {
 	config := DefaultCacheConfig()
 	config.MaxSize = 10
-	config.DefaultTTL = 50 * time.Millisecond
 
 	cache := NewCache(config)
 
-	// 设置短TTL
-	cache.Set("key1", "value1", 50*time.Millisecond)
+	cache.SetWithTTL("key1", "value1", 30*time.Millisecond)
 
-	// 应该立即存在
-	_, exists := cache.Get("key1")
-	if !exists {
-		t.Error("Expected key to exist")
+	if _, exists := cache.Get("key1"); !exists {
+		t.Error("Expected key to exist immediately after set")
 	}
 
 	// 等待过期
-	time.Sleep(100 * time.Millisecond)
-
-	// 过期后应该不存在
-	_, exists = cache.Get("key1")
-	if exists {
-		t.Error("Expected key to be expired")
-	}
+	waitFor(t, time.Second, func() bool {
+		_, exists := cache.Get("key1")
+		return !exists
+	}, "cache entry to expire")
 }
 
-func TestCache_LRU(t *testing.T) {
+func TestCache_Clear(t *testing.T) {
 	config := DefaultCacheConfig()
-	config.MaxSize = 2
-	config.DefaultTTL = 1 * time.Hour
+	config.MaxSize = 10
 
 	cache := NewCache(config)
 
-	// 填充缓存
-	cache.Set("key1", "value1", 0)
-	cache.Set("key2", "value2", 0)
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
 
-	// 访问key1使其成为最近使用
-	cache.Get("key1")
+	cache.Clear()
 
-	// 添加key3（应该驱逐key2）
-	cache.Set("key3", "value3", 0)
-
-	// key1应该仍然存在
-	_, exists := cache.Get("key1")
-	if !exists {
-		t.Error("Expected key1 to still exist")
+	if _, exists := cache.Get("key1"); exists {
+		t.Error("Expected key1 to be cleared")
 	}
-
-	// key2应该被驱逐
-	_, exists = cache.Get("key2")
-	if exists {
-		t.Error("Expected key2 to be evicted")
-	}
-
-	// key3应该存在
-	_, exists = cache.Get("key3")
-	if !exists {
-		t.Error("Expected key3 to exist")
+	if _, exists := cache.Get("key2"); exists {
+		t.Error("Expected key2 to be cleared")
 	}
 }
 
 // HTTP客户端池测试
 
 func TestHTTPClientPool_Basic(t *testing.T) {
-	// 创建测试服务器
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response"))
-	}))
+	server := createTestServer("test response", 0)
 	defer server.Close()
 
-	config := DefaultHTTPClientPoolConfig()
-	pool := NewHTTPClientPool(config)
+	pool := NewHTTPClientPool(DefaultHTTPClientPoolConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -519,7 +635,6 @@ func TestHTTPClientPool_Basic(t *testing.T) {
 	}
 	defer pool.Stop()
 
-	// 获取客户端并发起请求
 	client := pool.GetClient("test", nil)
 	resp, err := client.Get(server.URL)
 	if err != nil {
@@ -533,15 +648,10 @@ func TestHTTPClientPool_Basic(t *testing.T) {
 }
 
 func TestHTTPClientPool_DoRequest(t *testing.T) {
-	// 创建测试服务器
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response"))
-	}))
+	server := createTestServer("test response", 0)
 	defer server.Close()
 
-	config := DefaultHTTPClientPoolConfig()
-	pool := NewHTTPClientPool(config)
+	pool := NewHTTPClientPool(DefaultHTTPClientPoolConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -552,13 +662,11 @@ func TestHTTPClientPool_DoRequest(t *testing.T) {
 	}
 	defer pool.Stop()
 
-	// 创建请求
 	req, err := http.NewRequest("GET", server.URL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
 
-	// 通过池发起请求
 	resp, err := pool.DoRequest(ctx, req, "test", nil)
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
@@ -569,7 +677,6 @@ func TestHTTPClientPool_DoRequest(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
-	// 检查统计信息
 	stats := pool.GetStats()
 	if stats.TotalRequests == 0 {
 		t.Error("Expected at least one request in stats")
@@ -579,8 +686,7 @@ func TestHTTPClientPool_DoRequest(t *testing.T) {
 // 请求缓存测试
 
 func TestRequestCache_Basic(t *testing.T) {
-	config := DefaultRequestCacheConfig()
-	cache := NewRequestCache(config)
+	cache := NewRequestCache(DefaultRequestCacheConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -591,13 +697,10 @@ func TestRequestCache_Basic(t *testing.T) {
 	}
 	defer cache.Stop()
 
-	// 测试缓存未命中
-	_, exists := cache.Get("test-key")
-	if exists {
+	if _, exists := cache.Get("test-key"); exists {
 		t.Error("Expected cache miss")
 	}
 
-	// 设置缓存条目
 	response := &CachedResponse{
 		StatusCode: 200,
 		Headers:    map[string]string{"Content-Type": "text/plain"},
@@ -609,10 +712,9 @@ func TestRequestCache_Basic(t *testing.T) {
 
 	cache.Set("test-key", response)
 
-	// 测试缓存命中
 	cachedResp, exists := cache.Get("test-key")
 	if !exists {
-		t.Error("Expected cache hit")
+		t.Fatal("Expected cache hit")
 	}
 
 	if cachedResp.StatusCode != 200 {
@@ -625,42 +727,34 @@ func TestRequestCache_Basic(t *testing.T) {
 }
 
 func TestRequestCache_Expiry(t *testing.T) {
-	config := DefaultRequestCacheConfig()
-	cache := NewRequestCache(config)
+	cache := NewRequestCache(DefaultRequestCacheConfig())
 
-	// 设置短过期时间的缓存条目
 	response := &CachedResponse{
 		StatusCode: 200,
 		Headers:    map[string]string{},
 		Body:       []byte("test"),
-		Expiry:     time.Now().Add(50 * time.Millisecond),
+		Expiry:     time.Now().Add(30 * time.Millisecond),
 		Created:    time.Now(),
 		Size:       4,
 	}
 
 	cache.Set("test-key", response)
 
-	// 应该立即存在
-	_, exists := cache.Get("test-key")
-	if !exists {
-		t.Error("Expected cache hit")
+	if _, exists := cache.Get("test-key"); !exists {
+		t.Error("Expected cache hit immediately after set")
 	}
 
-	// 等待过期
-	time.Sleep(100 * time.Millisecond)
-
-	// 过期后应该不存在
-	_, exists = cache.Get("test-key")
-	if exists {
-		t.Error("Expected cache miss after expiry")
-	}
+	waitFor(t, time.Second, func() bool {
+		_, exists := cache.Get("test-key")
+		return !exists
+	}, "cached response to expire")
 }
 
 // 网络监控器测试
 
 func TestNetworkMonitor_Basic(t *testing.T) {
 	config := DefaultNetworkMonitorConfig()
-	config.UpdateInterval = 50 * time.Millisecond
+	config.UpdateInterval = 10 * time.Millisecond
 	monitor := NewNetworkMonitor(config)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -672,7 +766,6 @@ func TestNetworkMonitor_Basic(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// 记录一些延迟
 	monitor.RecordLatency(50 * time.Millisecond)
 	monitor.RecordLatency(100 * time.Millisecond)
 
@@ -688,7 +781,7 @@ func TestNetworkMonitor_Basic(t *testing.T) {
 
 func TestNetworkMonitor_Callbacks(t *testing.T) {
 	config := DefaultNetworkMonitorConfig()
-	config.UpdateInterval = 50 * time.Millisecond
+	config.UpdateInterval = 10 * time.Millisecond
 	monitor := NewNetworkMonitor(config)
 
 	callbackCalled := false
@@ -709,14 +802,11 @@ func TestNetworkMonitor_Callbacks(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// 等待回调
-	time.Sleep(100 * time.Millisecond)
-
-	mu.Lock()
-	if !callbackCalled {
-		t.Error("Expected callback to be called")
-	}
-	mu.Unlock()
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return callbackCalled
+	}, "network callback to be called")
 }
 
 // 基准测试
@@ -724,37 +814,50 @@ func TestNetworkMonitor_Callbacks(t *testing.T) {
 func BenchmarkWorkerPool_Submit(b *testing.B) {
 	config := DefaultWorkerPoolConfig()
 	config.WorkerCount = 4
-	config.QueueSize = 1000
+	config.QueueSize = 10000
+	config.ResultSize = 10000
 
 	pool := NewWorkerPool(config)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool.Start(ctx)
+	if err := pool.Start(ctx); err != nil {
+		b.Fatalf("Failed to start worker pool: %v", err)
+	}
 	defer pool.Stop()
+
+	// 持续排空结果队列，避免队列写满反压影响提交耗时
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-pool.GetResult():
+			case <-done:
+				return
+			}
+		}
+	}()
+	defer close(done)
+
+	handler := func(ctx context.Context, data interface{}) (interface{}, error) {
+		return "done", nil
+	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			task := func() interface{} {
-				return "done"
-			}
-			pool.Submit(task)
+			_ = pool.Submit(Job{Handler: handler})
 		}
 	})
 }
 
 func BenchmarkMemoryPool_GetPut(b *testing.B) {
-	config := DefaultMemoryPoolConfig()
-	config.BufferSize = 1024
-	config.MaxBuffers = 100
-
-	pool := NewMemoryPool(config)
+	pool := NewMemoryPool(DefaultMemoryPoolConfig())
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			buf := pool.Get()
+			buf := pool.Get(1024)
 			pool.Put(buf)
 		}
 	})
@@ -772,7 +875,7 @@ func BenchmarkCache_SetGet(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("key-%d", i%1000)
 			value := fmt.Sprintf("value-%d", i)
-			cache.Set(key, value, 0)
+			cache.Set(key, value)
 			cache.Get(key)
 			i++
 		}
@@ -780,11 +883,7 @@ func BenchmarkCache_SetGet(b *testing.B) {
 }
 
 func BenchmarkRateLimiter_Allow(b *testing.B) {
-	config := DefaultRateLimiterConfig()
-	config.Rate = 1000000 // 基准测试的高速率
-	config.Burst = 1000
-
-	limiter := NewRateLimiter(config)
+	limiter := NewRateLimiter(1000, time.Microsecond)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -796,13 +895,19 @@ func BenchmarkRateLimiter_Allow(b *testing.B) {
 
 // 测试辅助函数
 
-func allocateMemory(size int) []byte {
-	return make([]byte, size)
-}
+// waitFor 轮询 cond 直到其为真或超时，替代固定 sleep 以避免慢机器上的偶发失败
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, description string) {
+	t.Helper()
 
-func triggerGC() {
-	runtime.GC()
-	runtime.GC() // 调用两次以确保清理
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("Timed out after %v waiting for %s", timeout, description)
 }
 
 func createTestServer(response string, delay time.Duration) *httptest.Server {
@@ -812,17 +917,5 @@ func createTestServer(response string, delay time.Duration) *httptest.Server {
 		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(response))
-	}))
-}
-
-func createFailingTestServer(failureRate float64) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if time.Now().UnixNano()%100 < int64(failureRate*100) {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
-		} else {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Success"))
-		}
 	}))
 }
