@@ -11,7 +11,7 @@
 - ✅ **依赖注入**: 使用接口和依赖注入提高可测试性
 - ✅ **配置管理**: 从INI格式迁移到YAML，支持更复杂的配置结构
 - ✅ **错误处理**: 统一的错误处理机制，支持错误包装和上下文
-- ✅ **测试覆盖**: 单元测试和集成测试覆盖率达到85%
+- ✅ **测试覆盖**: 核心工具包具备单元测试（retry 91%、imageprocessor 75%、parser 71%、fragment 69%）
 
 #### 2. 性能优化
 - ✅ **并发模型**: 使用goroutines替代线程池，支持更高的并发度
@@ -25,13 +25,13 @@
 - ✅ **图片处理**: 完整的图片裁剪和水印功能，支持多种格式
 - ✅ **番号识别**: 自定义正则表达式支持，兼容更多番号格式
 - ✅ **错误恢复**: 更好的错误恢复和重试机制
-- ✅ **多数据源**: 支持15+数据源，包括主流和小众站点
+- ✅ **多数据源**: 支持 24 个数据源，涵盖主流、小众与国产站点
 
 ### 当前已实现的核心功能模块
 
 | 模块 | 状态 | 功能描述 | 兼容性 |
 |------|------|----------|--------|
-| 🔍 **数据爬取** | ✅ 完成 | 支持15+数据源，包括JavDB、JavBus、Fanza等 | 100% |
+| 🔍 **数据爬取** | ✅ 完成 | 支持 24 个数据源，包括JavDB、JavBus、Fanza、麻豆区等 | 100% |
 | 📁 **文件处理** | ✅ 完成 | 文件扫描、移动、重命名、目录创建 | 100% |
 | 🖼️ **图片处理** | ✅ 完成 | 封面下载、裁剪、水印添加、剧照处理 | 100% |
 | 📄 **NFO生成** | ✅ 完成 | Kodi/Jellyfin兼容的元数据文件生成 | 100% |
@@ -90,7 +90,7 @@ var httpClient = &http.Client{
 - **封面和剧照下载**: 并行下载封面图片和剧照
 - **NFO文件生成**: 生成Kodi/Jellyfin兼容的NFO元数据文件
 - **文件组织**: 根据规则自动组织文件和创建目录结构
-- **多站点支持**: 支持JavDB、JavBus、Fanza、XCity等多个数据源
+- **多站点支持**: 支持 JavDB、JavBus、Fanza、XCity、麻豆区等 24 个数据源
 - **并发处理**: 利用Go协程实现高效的并发处理
 - **错误处理**: 完善的错误处理和重试机制
 
@@ -102,39 +102,78 @@ movie-data-capture/
 ├── go.mod                     # Go模块定义
 ├── go.sum                     # Go依赖校验
 ├── config.yaml               # 配置文件
-├── movie_data_capture.exe     # 编译后的可执行文件
+├── config_template.yaml      # 配置模板（含完整注释说明）
 ├── internal/                 # 内部包
 │   ├── config/               # 配置管理
 │   │   └── config.go
 │   ├── core/                 # 核心处理逻辑
 │   │   └── processor.go
 │   └── scraper/              # 数据爬取模块
-│       ├── scraper.go        # 爬虫核心接口
-
-│       ├── avsox.go          # Avsox数据源
-│       ├── fanza.go          # Fanza数据源
-│       ├── fc2.go            # FC2数据源
-│       ├── jav321.go         # JAV321数据源
+│       ├── scraper.go        # 爬虫核心接口与分派
 │       ├── javbus.go         # JavBus数据源
 │       ├── javdb.go          # JavDB数据源
+│       ├── improved_javdb.go # JavDB增强版数据源
+│       ├── fanza.go          # Fanza数据源
+│       ├── dmm.go            # DMM数据源
+│       ├── xcity.go          # XCity数据源
 │       ├── mgstage.go        # MGStage数据源
-│       ├── utils.go          # 爬虫工具函数
-│       └── xcity.go          # XCity数据源
+│       ├── fc2.go            # FC2数据源
+│       ├── fc2club.go        # FC2Club数据源
+│       ├── jav321.go         # JAV321数据源
+│       ├── javlibrary.go     # JavLibrary数据源
+│       ├── cableav.go        # CableAV数据源
+│       ├── cnmdb.go          # CNMDB数据源
+│       ├── dahlia.go         # Dahlia数据源
+│       ├── faleno.go         # Faleno数据源
+│       ├── fantastica.go     # Fantastica数据源
+│       ├── carib.go          # Caribbeancom数据源
+│       ├── caribpr.go        # CaribbeancomPR数据源
+│       ├── dlsite.go         # DLsite数据源
+│       ├── gcolle.go         # GColle数据源
+│       ├── getchu.go         # Getchu数据源
+│       ├── javmenu.go        # JavMenu数据源
+│       ├── javday.go         # JavDay数据源
+│       ├── freejavbt.go      # FreeJavBT数据源
+│       ├── madou.go          # 麻豆数据源
+│       ├── madouqu.go        # 麻豆区数据源（国产传媒）
+│       └── utils.go          # 爬虫工具函数
 └── pkg/                      # 公共包
+    ├── downloader/           # 文件下载
+    │   └── downloader.go
+    ├── facedetection/        # 人脸检测
+    │   └── facedetection.go
+    ├── fragment/             # 分片文件处理
+    │   └── fragment.go
     ├── httpclient/           # HTTP客户端
     │   └── client.go
+    ├── imageprocessor/       # 图片处理（裁剪、增强、水印）
+    │   ├── imageprocessor.go
+    │   └── enhancement.go
     ├── logger/               # 日志系统
     │   └── logger.go
-    ├── downloader/           # 文件下载（待实现）
-    ├── imageprocessor/       # 图片处理（待实现）
     ├── nfo/                  # NFO文件生成
     │   └── generator.go
+    ├── parser/               # 番号解析
+    │   └── number_parser.go
+    ├── performance/          # 性能监控与并发工具
+    │   ├── monitor.go
+    │   ├── concurrency.go
+    │   ├── memory.go
+    │   └── network.go
+    ├── recovery/             # 错误恢复与状态持久化
+    │   ├── recovery.go
+    │   └── strategies.go
+    ├── retry/                # 智能重试机制
+    │   └── retry.go
     ├── storage/              # 存储管理
     │   └── storage.go
+    ├── strm/                 # STRM文件生成
+    │   └── strm.go
     ├── utils/                # 工具函数
     │   └── utils.go
     └── watermark/            # 水印处理
-        └── watermark.go
+        ├── watermark.go
+        └── advanced_watermark.go
 ```
 
 ### 架构说明
@@ -143,7 +182,7 @@ movie-data-capture/
 - **main.go**: 程序入口，处理命令行参数和程序初始化
 - **internal/config**: 配置文件解析和管理，支持YAML格式
 - **internal/core**: 核心业务逻辑，文件处理流程控制
-- **internal/scraper**: 多数据源爬虫实现，支持9个主要站点
+- **internal/scraper**: 多数据源爬虫实现，支持 24 个主要站点
 
 #### 公共包
 - **pkg/httpclient**: HTTP客户端封装，支持代理和重试
@@ -154,61 +193,35 @@ movie-data-capture/
 - **pkg/watermark**: 图片水印处理功能
 
 #### 数据源支持
-| 数据源 | 文件 | 状态 | 支持功能 |
-|--------|------|------|----------|
-| JavDB | javdb.go | ✅ 完成 | 元数据、封面、剧照 |
-| JavBus | javbus.go | ✅ 完成 | 元数据、封面 |
-| Fanza | fanza.go | ✅ 完成 | 元数据、封面、剧照 |
-| XCity | xcity.go | ✅ 完成 | 元数据、封面 |
-| MGStage | mgstage.go | ✅ 完成 | 元数据、封面 |
-| FC2 | fc2.go | ✅ 完成 | 元数据、封面 |
-| JAV321 | jav321.go | ✅ 完成 | 元数据、封面 |
-| Avsox | avsox.go | ✅ 完成 | 元数据、封面 |
-
-| Carib | carib.go | ✅ 完成 | 元数据、封面 |
-| CaribPR | caribpr.go | ✅ 完成 | 元数据、封面 |
-| DLsite | dlsite.go | ✅ 完成 | 元数据、封面 |
-| Gcolle | gcolle.go | ✅ 完成 | 元数据、封面 |
-| Getchu | getchu.go | ✅ 完成 | 元数据、封面 |
-| Madou | madou.go | ✅ 完成 | 元数据、封面 |
+| 数据源 | 配置名 | 文件 | 说明 |
+|--------|--------|------|------|
+| JavDB | `javdb` | improved_javdb.go | 综合，主力源 |
+| JavBus | `javbus` | javbus.go | 综合，覆盖面广 |
+| Fanza | `fanza` | fanza.go | 官方数据，质量高 |
+| DMM | `dmm` | dmm.go | 官方数据 |
+| XCity | `xcity` | xcity.go | 无码作品 |
+| MGStage | `mgstage` | mgstage.go | 素人企划 |
+| FC2 / FC2Club | `fc2` / `fc2club` | fc2club.go | 素人作品 |
+| JAV321 | `jav321` | jav321.go | 综合 |
+| JavLibrary | `javlibrary` | javlibrary.go | 综合 |
+| CableAV | `cableav` | cableav.go | 综合 |
+| CNMDB | `cnmdb` | cnmdb.go | 国产 |
+| Dahlia | `dahlia` | dahlia.go | 厂牌专用 |
+| Faleno | `faleno` | faleno.go | 厂牌专用 |
+| Fantastica | `fantastica` | fantastica.go | 厂牌专用 |
+| Caribbeancom | `carib` / `caribbeancom` | carib.go | 无码 |
+| CaribbeancomPR | `caribpr` / `caribbeancompr` | caribpr.go | 无码 |
+| DLsite | `dlsite` | dlsite.go | 同人作品 |
+| GColle | `gcolle` | gcolle.go | 同人作品 |
+| Getchu | `getchu` | getchu.go | 动漫作品 |
+| JavMenu | `javmenu` | javmenu.go | 综合 |
+| JavDay | `javday` | javday.go | 国产 |
+| FreeJavBT | `freejavbt` | freejavbt.go | 综合 |
+| 麻豆 | `madou` / `md` | madou.go | 国产 |
+| 麻豆区 | `madouqu` / `mdq` | madouqu.go | 国产传媒（麻豆/天美/蜜桃等厂牌） |
 
 
 ## 🔄 与Python版本对比分析
-
-### 性能优势
-
-#### 1. 并发处理能力
-| 指标 | Python版本 | Go版本 | 提升幅度 |
-|------|------------|--------|----------|
-| **最大并发数** | 50线程 | 10000+ goroutines | 200x |
-| **内存开销/并发** | ~8MB | ~2KB | 4000x |
-| **上下文切换** | 重量级 | 轻量级 | 100x |
-| **启动时间** | 毫秒级 | 微秒级 | 1000x |
-
-
-#### 2. 执行效率对比
-```bash
-# 性能基准测试结果
-# 测试环境: Intel i7-10700K, 32GB RAM, SSD
-# 测试数据: 1000个视频文件
-
-# Python版本
-time python Movie_Data_Capture.py --path ./test_files
-# 结果: 45分钟32秒
-# 内存峰值: 2.1GB
-# CPU使用率: 65%
-
-# Go版本
-time ./movie_data_capture --path ./test_files
-# 结果: 12分钟18秒
-# 内存峰值: 456MB
-# CPU使用率: 85%
-
-# 性能提升:
-# 执行时间: 73% 提升
-# 内存使用: 78% 减少
-# CPU利用率: 31% 提升
-```
 
 ### 开发效率对比
 
@@ -247,18 +260,6 @@ time ./movie_data_capture --path ./test_files
 - 重新编译发布
 ```
 
-### 内存占用和资源消耗情况
-
-
-#### 资源消耗对比
-| 资源类型 | Python版本 | Go版本 | 改善程度 |
-|----------|------------|--------|---------|
-| **启动内存** | 45MB | 8MB | 82% 减少 |
-| **运行时内存** | 150-500MB | 50-150MB | 70% 减少 |
-| **CPU使用** | 中等 | 高效 | 30% 提升 |
-| **磁盘I/O** | 频繁 | 优化 | 40% 减少 |
-| **网络连接** | 每请求新建 | 连接池复用 | 60% 减少 |
-
 ## 安装和使用
 
 ### 前置要求
@@ -271,12 +272,17 @@ go mod tidy
 
 ### 运行测试
 ```bash
-# 运行验证测试
-go run test_main.go
+# 运行全部测试
+go test ./...
 
-# 运行集成测试
-go run test_main.go test
+# 查看各包覆盖率
+go test ./... -cover
+
+# 运行单个包的测试（例如新增的 madouqu 数据源）
+go test ./internal/scraper/ -run MadouQu -v
 ```
+
+> Windows 上并行跑 `go test ./...` 偶发因资源竞争超时，可加 `-p 1` 串行执行。
 
 ### 基本使用
 ```bash
@@ -324,5 +330,13 @@ proxy:
   type: "socks5"                 # 代理类型
   
 priority:
-  website: "javbus,fanza,javdb"  # 数据源优先级
+  # 按顺序尝试，madouqu 为国产源，置于末位不影响日系番号的检索速度
+  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,jav321,madouqu"
+```
+
+也可在运行时用 `-source` 指定单一数据源：
+
+```bash
+# 只用麻豆区抓取国产番号
+./mdc -source madouqu -number "MDX-0212"
 ```

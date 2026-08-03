@@ -335,11 +335,8 @@ actor_photo:
 ### 1. 测试STRM文件生成
 
 ```bash
-# 运行STRM测试工具
-go run test_strm.go
-
-# 或使用编译后的版本
-./mdc-strm-test
+# 在 config.yaml 中将 strm.enable 设为 true，然后正常运行程序
+./mdc -path "/path/to/movies" -debug
 ```
 
 ### 2. 验证STRM文件内容

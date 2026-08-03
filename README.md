@@ -9,7 +9,7 @@ Movie Data Capture Go 是一个用 Go 语言编写的电影元数据自动抓取
 ## 🎯 主要功能
 
 ### 核心功能
-- **多站点数据抓取**: 支持 JavaBus、FANZA、FC2、JavDB、X-City 等多个数据源
+- **多站点数据抓取**: 支持 JavBus、FANZA、FC2、JavDB、X-City、麻豆区等 24 个数据源（含国产传媒）
 - **智能番号解析**: 自动从文件名中提取番号信息
 - **分片文件处理**: 自动识别和处理多部分电影文件（CD1/CD2、Part1/Part2等）
 - **NFO 文件生成**: 生成符合 Kodi/Jellyfin 标准的 NFO 元数据文件
@@ -119,7 +119,14 @@ strm:
 
 ```yaml
 priority:
-  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage"
+  # 按顺序尝试，madouqu 为国产源，置于末位不影响日系番号的检索速度
+  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,jav321,madouqu"
+```
+
+也可在运行时用 `-source` 指定单一数据源：
+
+```bash
+./mdc -source madouqu -number "MDX-0212"
 ```
 
 ## 🎨 输出结构
@@ -152,44 +159,85 @@ JAV_output/
 
 ## 🌐 支持的数据源
 
-| 网站 | 类型 | 说明 |
-|------|------|------|
-| JavBus | 综合 | 主要数据源 |
-| FANZA | 官方 | 高质量数据 |
-| JavDB | 综合 | 备用数据源 |
-| FC2 | 素人 | FC2 作品专用 |
-| X-City | 无码 | 无码作品 |
-| MGStage | 综合 | 备用数据源 |
+共 24 个数据源。`默认` 列标注是否在 `config.yaml` 的 `priority.website` 中默认启用。
+
+| 配置名 | 网站 | 类型 | 默认 |
+|--------|------|------|------|
+| `javbus` | JavBus | 综合 | ✅ |
+| `fanza` | FANZA | 官方 | ✅ |
+| `fc2` / `fc2club` | FC2 / FC2Club | 素人 | ✅ |
+| `javdb` | JavDB | 综合 | ✅ |
+| `xcity` | X-City | 无码 | ✅ |
+| `mgstage` | MGStage | 素人企划 | ✅ |
+| `jav321` | JAV321 | 综合 | ✅ |
+| `madouqu` / `mdq` | 麻豆区 | 国产传媒 | ✅ |
+| `dmm` | DMM | 官方 | |
+| `javlibrary` | JavLibrary | 综合 | |
+| `javmenu` | JavMenu | 综合 | |
+| `freejavbt` | FreeJavBT | 综合 | |
+| `cableav` | CableAV | 综合 | |
+| `carib` / `caribbeancom` | Caribbeancom | 无码 | |
+| `caribpr` / `caribbeancompr` | CaribbeancomPR | 无码 | |
+| `dahlia` | Dahlia | 厂牌 | |
+| `faleno` | Faleno | 厂牌 | |
+| `fantastica` | Fantastica | 厂牌 | |
+| `dlsite` | DLsite | 同人 | |
+| `gcolle` | GColle | 同人 | |
+| `getchu` | Getchu | 动漫 | |
+| `cnmdb` | CNMDB | 国产 | |
+| `javday` | JavDay | 国产 | |
+| `madou` / `md` | 麻豆 | 国产 | |
+
+需要启用非默认源时，将其配置名加入 `priority.website` 即可。
 
 ## 📊 项目结构
 
 ```
 movie-data-capture/
-├── cmd/                    # 命令行入口
-├── internal/              # 内部包
+├── main.go               # 程序入口
+├── config.yaml           # 配置文件
+├── config_template.yaml  # 配置模板（含完整注释说明）
+├── internal/             # 内部包
 │   ├── config/           # 配置管理
 │   ├── core/             # 核心处理逻辑
-│   └── scraper/          # 数据抓取器
-├── pkg/                   # 公共包
+│   └── scraper/          # 数据抓取器（24 个数据源）
+├── pkg/                  # 公共包
 │   ├── downloader/       # 下载器
+│   ├── facedetection/    # 人脸检测
 │   ├── fragment/         # 分片文件处理
 │   ├── httpclient/       # HTTP 客户端
+│   ├── imageprocessor/   # 图片处理（裁剪、增强）
 │   ├── logger/           # 日志系统
 │   ├── nfo/              # NFO 生成器
 │   ├── parser/           # 番号解析器
-│   └── utils/            # 工具函数
-├── config.yaml           # 配置文件
-└── main.go               # 程序入口
+│   ├── performance/      # 性能监控与并发工具
+│   ├── recovery/         # 错误恢复与状态持久化
+│   ├── retry/            # 智能重试机制
+│   ├── storage/          # 存储管理
+│   ├── strm/             # STRM 文件生成
+│   ├── utils/            # 工具函数
+│   └── watermark/        # 水印处理
+├── docs/                 # 文档（STRM 使用指南等）
+├── Img/                  # 水印素材
+└── MappingTable/         # 番号映射数据
 ```
 
-## 🧪 测试工具
+## 🧪 测试
 
-项目包含多个测试工具用于调试和验证功能：
+```bash
+# 运行全部测试
+go test ./...
 
-- `debug_fragment_processing.go` - 分片处理调试
-- `test_fragment_detection.go` - 分片检测测试
-- `test_fragment_integration.go` - 集成测试
-- `test_main_with_fragments.go` - 主程序测试
+# 查看各包覆盖率
+go test ./... -cover
+
+# 只跑某个数据源的测试
+go test ./internal/scraper/ -run MadouQu -v
+```
+
+已具备单元测试的包：`pkg/retry`（91%）、`pkg/imageprocessor`（75%）、`pkg/parser`（71%）、`pkg/fragment`（69%）、`pkg/performance`（57%）、`internal/config`（33%）、`pkg/recovery`（33%）、`internal/scraper`（madouqu 数据源解析）。
+
+> Windows 上并行跑 `go test ./...` 偶发因资源竞争超时，可加 `-p 1` 串行执行。
 
 ## 🤝 贡献指南
 
@@ -218,6 +266,15 @@ go build -o mdc main.go
 ```
 
 ## 📝 更新日志
+
+### v1.1.0 (2026-08-01)
+
+- ✨ 新增 **麻豆区（madouqu）** 国产传媒数据源，已加入默认源列表
+- 🧹 清理仓库：移除误提交的编译产物与根目录临时调试脚本，新增 `.gitignore`
+- 🐛 修复 `pkg/performance` 工作池 `Stop()` 死锁（未取消 context 时会永久阻塞）
+- 🐛 修复 `pkg/recovery` 状态保存自死锁与零值配置陷阱（`RecoveryTimeout=0` 导致上下文立即超时）
+- 🐛 修复 `GetStats()`/`GetMetrics()` 拷贝含锁结构体的并发缺陷（`go vet` copylocks）
+- ✅ `go build ./...`、`go vet ./...` 与全部测试通过
 
 ### v1.0.0 (2025-08-30)
 - ✨ 首个正式版本发布

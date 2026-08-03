@@ -259,7 +259,7 @@ func createDefaultConfig(path string) (*Config, error) {
 			UpdateCheck: true,
 		},
 		Priority: PriorityConfig{
-			Website: "javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,avsox,jav321",
+			Website: "javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,jav321,madouqu",
 		},
 		Escape: EscapeConfig{
 			Literals: "\\()/",
