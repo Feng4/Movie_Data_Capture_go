@@ -1,0 +1,38 @@
+# 编译产物
+mdc
+mdc-*
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+build/
+
+# 测试与覆盖率
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go 工作区
+go.work
+go.work.sum
+
+# 依赖目录
+vendor/
+
+# 运行时产物
+*.log
+logs/
+
+# 本地配置（config_template.yaml 为模板，保留）
+config.local.yaml
+
+# 编辑器与系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
