@@ -73,7 +73,7 @@ go build -o mdc main.go
 
 ```bash
 ./mdc --version
-# 输出: Movie Data Capture Go Version 1.0.0
+# 输出: Movie Data Capture Go Version 1.1.0
 ```
 
 ---
@@ -593,9 +593,9 @@ Error: Invalid image URL
 
 #### 4. 检查分片识别
 
-创建测试文件并运行分片测试工具：
+运行分片处理的单元测试：
 ```bash
-go run test_fragment_detection.go
+go test ./pkg/fragment/ -v
 ```
 
 ---
@@ -803,7 +803,15 @@ common:
 
 ## 版本历史
 
-### v1.0.0 (2024-08-30)
+### v1.1.0 (2026-08-01)
+- ✨ 新增 **麻豆区（madouqu）** 国产传媒数据源，已加入默认源列表
+- 🧹 清理仓库：移除误提交的编译产物与根目录临时调试脚本，新增 `.gitignore`
+- 🐛 修复工作池 `Stop()` 死锁（未取消 context 时会永久阻塞）
+- 🐛 修复状态恢复模块自死锁与零值配置陷阱
+- 🐛 修复 `GetStats()`/`GetMetrics()` 拷贝含锁结构体的并发缺陷
+- 📝 修正文档中失实的数据源数量、测试覆盖率与失效的命令引用
+
+### v1.0.0 (2025-08-30)
 - ✨ 首个正式版本发布
 - 🚀 支持多站点数据抓取
 - 🎯 智能分片文件处理

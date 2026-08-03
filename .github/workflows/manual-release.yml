@@ -6,7 +6,7 @@ on:
       version:
         description: '版本号 (例如: v1.0.1)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.1.0'
         type: string
       create_tag:
         description: '是否创建Git标签'

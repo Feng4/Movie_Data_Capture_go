@@ -73,7 +73,7 @@ update:
 # 数据源优先级 (Website Priority)
 # ==============================================
 priority:
-  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,avsox,jav321"
+  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,jav321,madouqu"
   
 # 支持的数据源:
 # - javbus: JavBus (推荐，覆盖面广)
@@ -83,8 +83,8 @@ priority:
 # - javdb: JavDB (备用数据源)
 # - xcity: X-City (无码作品)
 # - mgstage: MGStage
-# - avsox: AVSOX
 # - jav321: JAV321
+# - madouqu: 麻豆区 (国产传媒，如麻豆/天美/蜜桃等厂牌)
 
 # ==============================================
 # 特殊字符处理 (Escape Configuration)

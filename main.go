@@ -16,7 +16,7 @@ import (
 	"movie-data-capture/pkg/utils"
 )
 
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 func main() {
 	var (

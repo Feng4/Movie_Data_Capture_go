@@ -155,5 +155,5 @@ help:
 	@echo "  make help          - 显示此帮助"
 	@echo ""
 	@echo "示例:"
-	@echo "  make build VERSION=v1.0.0    - 构建版本 v1.0.0"
+	@echo "  make build VERSION=v1.1.0    - 构建版本 v1.1.0"
 	@echo "  make build-linux/amd64       - 只构建 Linux 64位版本"

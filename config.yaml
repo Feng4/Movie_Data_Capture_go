@@ -44,7 +44,8 @@ update:
   update_check: true                   # 检查更新
 
 priority:
-  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,avsox,jav321"
+  website: "javbus,fanza,fc2,fc2club,javdb,xcity,mgstage,jav321,madouqu"
+  # 按顺序尝试，madouqu 为国产源（麻豆/天美/蜜桃等厂牌），置于末位不影响日系番号速度
 
 escape:
   literals: "\\()/ "                   # 路径中需要转义的字符
