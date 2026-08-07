@@ -127,7 +127,7 @@ uncensored:
 # 媒体文件类型 (Media Types)
 # ==============================================
 media:
-  media_type: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso"
+  media_type: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso,.strm"
   sub_type: ".smi,.srt,.idx,.sub,.sup,.psb,.ssa,.ass,.usf,.xss,.ssf,.rt,.lrc,.sbv,.vtt,.ttml"
 
 # ==============================================

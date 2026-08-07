@@ -35,6 +35,19 @@ func getNumberByBuiltinPatterns(name string) string {
 	return numberParser.GetNumber(name)
 }
 
+// pointerMediaExtensions 是指针类媒体文件的扩展名集合。
+// 这类文件不含媒体数据本身，只记录指向真实媒体的路径或地址，
+// 因此体积极小，不适用「小文件即广告」的判断。
+var pointerMediaExtensions = map[string]bool{
+	".strm": true,
+}
+
+// isPointerMediaFile 判断给定扩展名是否为指针类媒体文件。
+// 传入的扩展名应已转为小写并含前导点，例如 ".strm"。
+func isPointerMediaFile(ext string) bool {
+	return pointerMediaExtensions[ext]
+}
+
 // GetMovieList 返回源文件夹中的电影文件列表
 func GetMovieList(sourceFolder string, cfg *config.Config) ([]string, error) {
 	var movieList []string
@@ -84,8 +97,10 @@ func GetMovieList(sourceFolder string, cfg *config.Config) ([]string, error) {
 			return nil
 		}
 		
-		// 跳过小文件（可能是广告）- 但允许大小为 0 的文件用于测试
-		if info.Size() > 0 && info.Size() < 125829120 { // 120MB
+		// 跳过小文件（可能是广告）- 但允许大小为 0 的文件用于测试。
+		// 指针类文件（如 .strm）本身只是一行指向真实媒体的文本，
+		// 体积通常不足 1KB，必须豁免，否则会被当作广告丢弃而无法刮削。
+		if !isPointerMediaFile(ext) && info.Size() > 0 && info.Size() < 125829120 { // 120MB
 			// 如果是调试/测试模式或明确配置则允许处理
 			if !cfg.DebugMode.Switch {
 				return nil

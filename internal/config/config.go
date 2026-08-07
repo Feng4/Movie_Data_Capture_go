@@ -283,7 +283,7 @@ func createDefaultConfig(path string) (*Config, error) {
 			UncensoredPrefix: "S2M,BT,LAF,SMD",
 		},
 		Media: MediaConfig{
-			MediaType: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso",
+			MediaType: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso,.strm",
 			SubType:   ".smi,.srt,.idx,.sub,.sup,.psb,.ssa,.ass,.usf,.xss,.ssf,.rt,.lrc,.sbv,.vtt,.ttml",
 		},
 		Watermark: WatermarkConfig{
