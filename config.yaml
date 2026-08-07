@@ -70,7 +70,7 @@ uncensored:
   uncensored_prefix: "S2M,BT,LAF,SMD" # 无码番号前缀
 
 media:
-  media_type: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso"
+  media_type: ".mp4,.avi,.rmvb,.wmv,.mov,.mkv,.flv,.ts,.webm,.iso,.strm"
   sub_type: ".smi,.srt,.idx,.sub,.sup,.psb,.ssa,.ass,.usf,.xss,.ssf,.rt,.lrc,.sbv,.vtt,.ttml"
 
 watermark:
