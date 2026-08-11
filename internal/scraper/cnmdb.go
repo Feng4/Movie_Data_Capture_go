@@ -13,7 +13,6 @@ import (
 
 // scrapeCNMDB scrapes movie data from CNMDB
 func (s *Scraper) scrapeCNMDB(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting CNMDB scraping for number: %s", number)
 
 	// Get number list for searching
 	numberList := s.getNumberList(number)

@@ -11,7 +11,6 @@ import (
 // The website blocks connections at the TCP level and returns 403 errors for automated requests.
 // This implementation provides the complete framework but cannot function due to these restrictions.
 func (s *Scraper) scrapeJavLibrary(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting JavLibrary scraping for number: %s", number)
 	logger.Debug("WARNING: JavLibrary has strict anti-bot protection that blocks automated access")
 	
 	// Convert number to uppercase as JavLibrary expects

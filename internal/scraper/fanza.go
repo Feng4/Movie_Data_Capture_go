@@ -13,7 +13,6 @@ import (
 
 // scrapeFanza scrapes movie data from Fanza (DMM)
 func (s *Scraper) scrapeFanza(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting Fanza scraping for number: %s", number)
 	
 	// Normalize Fanza search number
 	fanzaSearchNumber := number

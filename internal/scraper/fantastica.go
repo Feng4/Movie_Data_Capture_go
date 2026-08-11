@@ -13,7 +13,6 @@ import (
 
 // scrapeFantastica scrapes movie data from Fantastica
 func (s *Scraper) scrapeFantastica(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting Fantastica scraping for number: %s", number)
 
 	// Search for the movie
 	searchURL := fmt.Sprintf("https://fantastica-vr.com/search?q=%s", url.QueryEscape(number))

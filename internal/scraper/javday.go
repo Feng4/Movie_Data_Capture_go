@@ -12,7 +12,6 @@ import (
 
 // scrapeJavDay 从JavDay抓取电影数据
 func (s *Scraper) scrapeJavDay(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting JavDay scraping for number: %s", number)
 	
 	// JavDay基础URL
 	baseURL := "https://javday.tv"

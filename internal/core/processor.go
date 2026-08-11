@@ -409,12 +409,14 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 		thumbPath = "thumb" + ext
 	}
 
+	var downloadWarns []string
+
 	// Download cover image
 	fullThumbPath := filepath.Join(outputPath, thumbPath)
 	if data.Cover != "" {
 		err = p.downloader.DownloadCover(ctx, data.Cover, fullThumbPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download cover: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("cover: %v", err))
 		} else {
 			// Create fanart copy for non-Jellyfin
 			if p.config.Common.Jellyfin == 0 {
@@ -430,7 +432,7 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 		smallCoverPath := filepath.Join(outputPath, posterPath)
 		err = p.downloader.DownloadCover(ctx, data.CoverSmall, smallCoverPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download small cover: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("small cover: %v", err))
 		}
 	}
 
@@ -438,7 +440,7 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 	if (flags.Part == "" || strings.ToLower(flags.Part) == "-cd1") && p.config.Extrafanart.Switch && len(data.Extrafanart) > 0 {
 		err = p.downloader.DownloadExtrafanart(ctx, data.Extrafanart, outputPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download extrafanart: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("extrafanart: %v", err))
 		}
 	}
 
@@ -448,7 +450,7 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 		trailerPath := filepath.Join(outputPath, trailerName)
 		err = p.downloader.DownloadTrailer(ctx, data.Trailer, trailerPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download trailer: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("trailer: %v", err))
 		}
 	}
 
@@ -456,8 +458,12 @@ func (p *Processor) processScrapingModeWithFragment(ctx context.Context, filePat
 	if (flags.Part == "" || strings.ToLower(flags.Part) == "-cd1") && p.config.ActorPhoto.DownloadForKodi && len(data.ActorPhoto) > 0 {
 		err = p.downloader.DownloadActorPhotos(ctx, data.ActorPhoto, outputPath)
 		if err != nil {
-			logger.Warn("Failed to download actor photos: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("actor photos: %v", err))
 		}
+	}
+
+	if len(downloadWarns) > 0 {
+		logger.Warn("Image download issues for %s: %s", data.Number, strings.Join(downloadWarns, "; "))
 	}
 
 	// Perform image cutting/cropping
@@ -635,12 +641,14 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 		thumbPath = "thumb" + ext
 	}
 
+	var downloadWarns []string
+
 	// Download cover image
 	fullThumbPath := filepath.Join(outputPath, thumbPath)
 	if data.Cover != "" {
 		err = p.downloader.DownloadCover(ctx, data.Cover, fullThumbPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download cover: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("cover: %v", err))
 		} else {
 			// Create fanart copy for non-Jellyfin
 			if p.config.Common.Jellyfin == 0 {
@@ -656,7 +664,7 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 		smallCoverPath := filepath.Join(outputPath, posterPath)
 		err = p.downloader.DownloadCover(ctx, data.CoverSmall, smallCoverPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download small cover: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("small cover: %v", err))
 		}
 	}
 
@@ -664,7 +672,7 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 	if (part == "" || strings.ToLower(part) == "-cd1") && p.config.Extrafanart.Switch && len(data.Extrafanart) > 0 {
 		err = p.downloader.DownloadExtrafanart(ctx, data.Extrafanart, outputPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download extrafanart: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("extrafanart: %v", err))
 		}
 	}
 
@@ -674,7 +682,7 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 		trailerPath := filepath.Join(outputPath, trailerName)
 		err = p.downloader.DownloadTrailer(ctx, data.Trailer, trailerPath, data.Headers)
 		if err != nil {
-			logger.Warn("Failed to download trailer: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("trailer: %v", err))
 		}
 	}
 
@@ -682,8 +690,12 @@ func (p *Processor) processScrapingMode(ctx context.Context, filePath string, da
 	if (part == "" || strings.ToLower(part) == "-cd1") && p.config.ActorPhoto.DownloadForKodi && len(data.ActorPhoto) > 0 {
 		err = p.downloader.DownloadActorPhotos(ctx, data.ActorPhoto, outputPath)
 		if err != nil {
-			logger.Warn("Failed to download actor photos: %v", err)
+			downloadWarns = append(downloadWarns, fmt.Sprintf("actor photos: %v", err))
 		}
+	}
+
+	if len(downloadWarns) > 0 {
+		logger.Warn("Image download issues for %s: %s", data.Number, strings.Join(downloadWarns, "; "))
 	}
 
 	// Perform image cutting/cropping

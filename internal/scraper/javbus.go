@@ -12,7 +12,6 @@ import (
 
 // scrapeJavBus 从JavBus抓取电影数据
 func (s *Scraper) scrapeJavBus(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting JavBus scraping for number: %s", number)
 	
 	// 特殊番号映射（基于Python版本）
 	specialMappings := map[string]string{

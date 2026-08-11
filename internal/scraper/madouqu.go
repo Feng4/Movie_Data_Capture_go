@@ -32,7 +32,6 @@ func madouquHeaders() map[string]string {
 // 详情页正文以「番號：」「片名：」「女郎：」等中文标签罗列字段，
 // 站点混用繁简，故解析时同时匹配两种写法。
 func (s *Scraper) scrapeMadouQu(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting MadouQu scraping for number: %s", number)
 
 	detailURL, matchedTitle, err := s.searchMadouQu(ctx, number)
 	if err != nil {

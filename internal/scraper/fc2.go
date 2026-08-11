@@ -18,7 +18,6 @@ import (
 // Note: FC2 adult content service has been partially shut down since November 2024
 // due to legal issues in Japan. Connection failures are expected.
 func (s *Scraper) scrapeFC2(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting FC2 scraping for number: %s", number)
 	logger.Info("Warning: FC2 adult content service has been partially shut down since November 2024")
 	
 	// Extract numeric part from FC2 number (FC2-1234567 -> 1234567)
