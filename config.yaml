@@ -52,7 +52,7 @@ escape:
   folders: "failed, JAV_output"       # 扫描时需要转义的文件夹
 
 debug_mode:
-  switch: true                       # 启用调试模式
+  switch: false                      # 启用调试模式（关闭时只输出 INFO 及以上）
 
 translate:
   switch: false                       # 启用翻译

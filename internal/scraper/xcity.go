@@ -14,7 +14,6 @@ import (
 
 // scrapeXCity 从XCity抓取电影数据
 func (s *Scraper) scrapeXCity(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting XCity scraping for number: %s", number)
 	
 	// XCity搜索需要表单提交
 	xcityNumber := strings.ReplaceAll(number, "-", "")

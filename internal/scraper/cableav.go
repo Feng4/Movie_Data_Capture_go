@@ -13,7 +13,6 @@ import (
 
 // scrapeCableAV scrapes movie data from CableAV
 func (s *Scraper) scrapeCableAV(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting CableAV scraping for number: %s", number)
 
 	// Get number list for searching
 	numberList := s.getNumberList(number)

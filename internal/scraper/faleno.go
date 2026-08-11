@@ -13,7 +13,6 @@ import (
 
 // scrapeFaleno scrapes movie data from Faleno
 func (s *Scraper) scrapeFaleno(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting Faleno scraping for number: %s", number)
 
 	// Try different Faleno sites
 	sites := []string{

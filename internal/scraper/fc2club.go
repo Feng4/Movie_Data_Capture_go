@@ -14,7 +14,6 @@ import (
 
 // scrapeFC2Club scrapes movie data from FC2Club
 func (s *Scraper) scrapeFC2Club(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting FC2Club scraping for number: %s", number)
 
 	// Search for the movie
 	searchURL := fmt.Sprintf("https://fc2club.top/search?q=%s", url.QueryEscape(number))

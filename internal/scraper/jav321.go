@@ -13,7 +13,6 @@ import (
 
 // scrapeJAV321 从JAV321抓取电影数据
 func (s *Scraper) scrapeJAV321(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting JAV321 scraping for number: %s", number)
 	
 	// JAV321搜索URL
 	searchURL := "https://www.jav321.com/search"

@@ -162,40 +162,25 @@ func IsUncensored(number string, cfg *config.Config) bool {
 	return numberParser.IsUncensored(number)
 }
 
-// DebugPrint 以调试格式打印电影数据
+// DebugPrint 以调试格式打印电影数据。
+// 将字段分组输出到少量行，避免一部影片占用 15+ 行日志。
 func DebugPrint(data *scraper.MovieData) {
 	if data == nil {
 		return
 	}
-	
-	logger.Debug("------- DEBUG INFO -------")
-	logger.Debug("number: %s", data.Number)
-	logger.Debug("title: %s", data.Title)
-	logger.Debug("actor: %s", data.Actor)
-	logger.Debug("director: %s", data.Director)
-	logger.Debug("studio: %s", data.Studio)
-	logger.Debug("year: %s", data.Year)
-	logger.Debug("release: %s", data.Release)
-	logger.Debug("runtime: %s", data.Runtime)
-	logger.Debug("series: %s", data.Series)
-	logger.Debug("label: %s", data.Label)
-	logger.Debug("cover: %s", data.Cover)
-	logger.Debug("website: %s", data.Website)
-	logger.Debug("source: %s", data.Source)
-	
+
+	logger.Debug("--- %s [%s] ---", data.Number, data.Source)
+	logger.Debug("  title:   %s", data.Title)
+	logger.Debug("  actor:   %s | director: %s | studio: %s", data.Actor, data.Director, data.Studio)
+	logger.Debug("  release: %s | year: %s | runtime: %s | series: %s | label: %s",
+		data.Release, data.Year, data.Runtime, data.Series, data.Label)
+	logger.Debug("  cover:   %s", data.Cover)
+	logger.Debug("  website: %s", data.Website)
+
 	if len(data.Tag) > 0 {
-		logger.Debug("tags: %d items", len(data.Tag))
+		logger.Debug("  tags: %d | extrafanart: %d | outline: %d chars",
+			len(data.Tag), len(data.Extrafanart), len(data.Outline))
 	}
-	
-	if len(data.Extrafanart) > 0 {
-		logger.Debug("extrafanart: %d links", len(data.Extrafanart))
-	}
-	
-	if len(data.Outline) > 0 {
-		logger.Debug("outline: %d characters", len(data.Outline))
-	}
-	
-	logger.Debug("------- DEBUG INFO -------")
 }
 
 // GetImageExtension 从 URL 确定图像扩展名

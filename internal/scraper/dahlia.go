@@ -13,7 +13,6 @@ import (
 
 // scrapeDahlia scrapes movie data from Dahlia
 func (s *Scraper) scrapeDahlia(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting Dahlia scraping for number: %s", number)
 
 	// Search for the movie
 	searchURL := fmt.Sprintf("https://www.dahlia-av.jp/search?q=%s", url.QueryEscape(number))

@@ -65,6 +65,13 @@ func main() {
 		cfg.DebugMode.Switch = true
 	}
 
+	// 根据调试开关设置日志级别：关闭时只输出 INFO 及以上，避免 DEBUG 刷屏
+	if cfg.DebugMode.Switch {
+		logger.SetLevel(logger.DEBUG)
+	} else {
+		logger.SetLevel(logger.INFO)
+	}
+
 	printHeader()
 
 	startTime := time.Now()

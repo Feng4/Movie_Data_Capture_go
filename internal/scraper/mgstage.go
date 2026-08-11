@@ -12,7 +12,6 @@ import (
 
 // scrapeMGStage 从MGStage抓取电影数据
 func (s *Scraper) scrapeMGStage(ctx context.Context, number string) (*MovieData, error) {
-	logger.Debug("Starting MGStage scraping for number: %s", number)
 	
 	// MGStage使用直接产品URL
 	productURL := fmt.Sprintf("https://www.mgstage.com/product/product_detail/%s/", number)
