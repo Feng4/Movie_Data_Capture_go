@@ -576,6 +576,7 @@ movie-data-capture/
 - 📝 重写 README，补充完整的安装、模式、参数、配置与故障排除说明
 - 📚 新增 Wiki 文档（`docs/wiki/`，共 10 页：安装、快速开始、CLI、配置、模式、数据源、命名、分片、故障排除）
 - ⚙️ 发布流程改进：CI 先跑测试再构建、产物自校验版本号、Release 说明自动提取自 README 更新日志，发布包附带 `docs/` 与 `config_template.yaml`
+- 🐛 CI 修复：交叉编译产物跳过本机自检（Exec format error）；macOS runner 因 dyld 兼容问题跳过测试步骤（测试由 Linux/Windows 覆盖），工具链升级至 Go 1.25
 
 ### v1.1.0 (2026-08-01)
 
