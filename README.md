@@ -1,6 +1,6 @@
 # Movie Data Capture Go
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#安装)
 
@@ -71,7 +71,7 @@ chmod +x mdc
 
 ### 方式 2: 从源码编译
 
-需要 Go 1.21 或更高版本：
+需要 Go 1.22 或更高版本：
 
 ```bash
 git clone https://github.com/Feng4/movie_data_capture_go.git
