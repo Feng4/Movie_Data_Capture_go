@@ -155,12 +155,19 @@ func TestRecoveryManager_SaveLoadState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create recovery manager: %v", err)
 	}
+	// 测试结束后必须等待异步保存协程收敛，否则会与 TempDir 清理竞争文件
+	defer rm1.Close()
 
 	_ = rm1.CreateProcess("test-process-4", "Test Process 4", 3)
 	rm1.UpdateProcess("test-process-4", func(state *ProcessState) {
 		state.Status = StatusRunning
 		state.CompletedSteps = 2
 	})
+
+	// 等待异步保存完成后再创建第二个管理器，避免并发读写状态文件
+	if err := rm1.Close(); err != nil {
+		t.Fatalf("Failed to close first recovery manager: %v", err)
+	}
 
 	// 保存状态
 	err = rm1.SaveState()
@@ -173,6 +180,7 @@ func TestRecoveryManager_SaveLoadState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create second recovery manager: %v", err)
 	}
+	defer rm2.Close()
 
 	// 验证加载的状态
 	loadedProcess, err := rm2.GetProcess("test-process-4")
