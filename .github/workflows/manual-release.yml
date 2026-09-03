@@ -4,15 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号 (例如: v1.0.1)'
+        description: '版本号 (例如: v1.1.1)'
         required: true
-        default: 'v1.1.0'
+        default: 'v1.1.1'
         type: string
       create_tag:
         description: '是否创建Git标签'
         required: true
         default: true
         type: boolean
+      notes:
+        description: '额外发布说明（可选，会追加在更新日志之后）'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -26,44 +31,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows builds
+          # Windows
           - os: windows
             arch: amd64
             runner: windows-latest
             ext: .exe
-            
+
           - os: windows
             arch: 386
             runner: windows-latest
             ext: .exe
-            
-          # Linux builds
+
+          # Linux
           - os: linux
             arch: amd64
             runner: ubuntu-latest
             ext: ''
-            
+
           - os: linux
             arch: 386
             runner: ubuntu-latest
             ext: ''
-            
+
           - os: linux
             arch: arm64
             runner: ubuntu-latest
             ext: ''
-            
+
           - os: linux
             arch: arm
             runner: ubuntu-latest
             ext: ''
-            
-          # macOS builds
+
+          # macOS
           - os: darwin
             arch: amd64
             runner: macos-latest
             ext: ''
-            
+
           - os: darwin
             arch: arm64
             runner: macos-latest
@@ -91,6 +96,9 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Run tests
+      run: go test ./... -p 1
+
     - name: Build binary
       env:
         GOOS: ${{ matrix.os }}
@@ -99,30 +107,35 @@ jobs:
       run: |
         go build -ldflags="-s -w -X main.Version=${{ inputs.version }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
 
+    - name: Verify binary
+      run: |
+        BIN="mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          ./$BIN -version
+        else
+          chmod +x "$BIN" && ./$BIN -version
+        fi
+      shell: bash
+
     - name: Prepare release package
       run: |
-        # Create unique directory name to avoid conflicts
         BUILD_DIR="release-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}"
         mkdir -p "$BUILD_DIR"
-        
-        # Copy binary
+
         cp mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} "$BUILD_DIR/"
-        
-        # Copy additional files if they exist
-        [ -f config.yaml ] && cp config.yaml "$BUILD_DIR/" || echo "config.yaml not found"
-        [ -f README.md ] && cp README.md "$BUILD_DIR/" || echo "README.md not found"
-        [ -d Img ] && cp -r Img "$BUILD_DIR/" || echo "Img directory not found"
-        
-        # Create archive
+
+        [ -f config.yaml ] && cp config.yaml "$BUILD_DIR/"
+        [ -f config_template.yaml ] && cp config_template.yaml "$BUILD_DIR/"
+        [ -f README.md ] && cp README.md "$BUILD_DIR/"
+        [ -d Img ] && cp -r Img "$BUILD_DIR/"
+        [ -d docs ] && cp -r docs "$BUILD_DIR/"
+
         if [ "${{ matrix.os }}" = "windows" ]; then
-          # Use PowerShell for Windows
           powershell -Command "Compress-Archive -Path '$BUILD_DIR/*' -DestinationPath 'mdc-${{ matrix.os }}-${{ matrix.arch }}.zip' -Force"
         else
-          # Use tar for Unix systems
           tar -czf mdc-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C "$BUILD_DIR" .
         fi
-        
-        # Clean up temporary directory
+
         rm -rf "$BUILD_DIR"
       shell: bash
 
@@ -164,10 +177,39 @@ jobs:
     needs: [build, create-tag]
     runs-on: ubuntu-latest
     if: always() && needs.build.result == 'success'
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Extract changelog from README
+      id: changelog
+      run: |
+        VERSION="${{ inputs.version }}"
+        awk -v ver="$VERSION" '
+          $0 ~ "^### " { if (found) exit; if (index($0, ver)) found=1 }
+          found { print }
+        ' README.md > changelog.md
+
+        if [ -s changelog.md ]; then
+          echo "=== 提取到的更新日志 ==="
+          cat changelog.md
+        else
+          echo "README 中未找到 $VERSION 的更新日志段落，使用默认说明" >&2
+          echo "### $VERSION" > changelog.md
+          echo "" >> changelog.md
+          echo "手动发布版本，包含所有最新功能和修复。" >> changelog.md
+        fi
+
+        if [ -n "${{ inputs.notes }}" ]; then
+          echo "" >> changelog.md
+          echo "---" >> changelog.md
+          echo "" >> changelog.md
+          echo "### 📌 本次补充说明" >> changelog.md
+          echo "" >> changelog.md
+          echo "${{ inputs.notes }}" >> changelog.md
+        fi
+      shell: bash
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -175,49 +217,14 @@ jobs:
         path: ./artifacts
 
     - name: Display structure of downloaded files
-      run: |
-        echo "=== Downloaded artifacts ==="
-        find ./artifacts -type f -name "*.zip" -o -name "*.tar.gz" | sort
+      run: find ./artifacts -type f | sort
 
     - name: Create Release
-      id: create_release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ inputs.version }}
         name: Movie Data Capture Go ${{ inputs.version }}
-        body: |
-          ## 🚀 Movie Data Capture Go ${{ inputs.version }}
-          
-          ### 📦 下载说明
-          
-          请根据你的操作系统下载对应的版本：
-          
-          - **Windows**:
-            - `mdc-windows-amd64.zip` - Windows 64位 (推荐)
-            - `mdc-windows-386.zip` - Windows 32位
-            
-          - **Linux**:
-            - `mdc-linux-amd64.tar.gz` - Linux 64位 (推荐)
-            - `mdc-linux-386.tar.gz` - Linux 32位
-            - `mdc-linux-arm64.tar.gz` - Linux ARM64
-            - `mdc-linux-arm.tar.gz` - Linux ARM
-            
-          - **macOS**:
-            - `mdc-darwin-amd64.tar.gz` - macOS Intel 芯片
-            - `mdc-darwin-arm64.tar.gz` - macOS Apple Silicon (M1/M2)
-          
-          ### 🔧 使用方法
-          
-          1. 下载对应平台的压缩包
-          2. 解压到任意目录
-          3. 编辑 `config.yaml` 配置文件
-          4. 运行程序
-          
-          ### 📝 更新内容
-          
-          手动发布版本，包含所有最新功能和修复。
-          
-          完整的更新日志请查看 [README.md](https://github.com/Feng4/movie-data-capture-go/blob/main/README.md)
+        body_path: changelog.md
         draft: false
         prerelease: false
         files: |
