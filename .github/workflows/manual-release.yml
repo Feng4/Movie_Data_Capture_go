@@ -31,48 +31,56 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows
+          # Windows（amd64 宿主机可运行 386 二进制）
           - os: windows
             arch: amd64
             runner: windows-latest
             ext: .exe
+            verify: true
 
           - os: windows
             arch: 386
             runner: windows-latest
             ext: .exe
+            verify: true
 
-          # Linux
+          # Linux（amd64 宿主机可运行 386；arm/arm64 为交叉编译，无法本机执行）
           - os: linux
             arch: amd64
             runner: ubuntu-latest
             ext: ''
+            verify: true
 
           - os: linux
             arch: 386
             runner: ubuntu-latest
             ext: ''
+            verify: true
 
           - os: linux
             arch: arm64
             runner: ubuntu-latest
             ext: ''
+            verify: false
 
           - os: linux
             arch: arm
             runner: ubuntu-latest
             ext: ''
+            verify: false
 
-          # macOS
+          # macOS（macos-latest 为 arm64；amd64 为交叉编译，无法本机执行）
           - os: darwin
             arch: amd64
             runner: macos-latest
             ext: ''
+            verify: false
 
           - os: darwin
             arch: arm64
             runner: macos-latest
             ext: ''
+            verify: true
 
     steps:
     - name: Checkout code
@@ -108,6 +116,7 @@ jobs:
         go build -ldflags="-s -w -X main.Version=${{ inputs.version }}" -o mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} main.go
 
     - name: Verify binary
+      if: matrix.verify
       run: |
         BIN="mdc-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
         if [ "${{ matrix.os }}" = "windows" ]; then
