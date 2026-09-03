@@ -24,7 +24,7 @@ Movie Data Capture Go（简称MDC-Go）是一个强大的电影元数据自动�
 - 📝 **NFO生成**: 创建符合Kodi/Jellyfin标准的元数据文件
 - 🖼️ **图片处理**: 下载封面、海报、剧照并自动处理
 - 📁 **智能整理**: 按照自定义规则整理文件目录结构
-- 🔗 **多种模式**: 支持移动、软链接、硬链接和STRM文件
+- 🔗 **多种模式**: 支持移动、软链接、硬链接三种文件处理方式
 - 🎭 **分片处理**: 智能处理多部分电影文件
 
 ---
@@ -333,39 +333,7 @@ common:
 
 ## 高级功能
 
-### 1. STRM文件生成
-
-**功能**: 为媒体中心生成STRM文件，实现无文件移动的播放
-
-**配置**:
-```yaml
-strm:
-  enable: true                      # 启用STRM功能
-  path_type: "absolute"             # 路径类型
-  content_mode: "detailed"          # 内容模式
-  multipart_mode: "separate"        # 分片处理模式
-```
-
-**路径类型**:
-- `absolute`: 绝对路径 `/home/user/movies/file.mp4`
-- `relative`: 相对路径 `../movies/file.mp4`
-- `network`: 网络路径 `\\server\movies\file.mp4`
-
-**内容模式**:
-- `simple`: 仅包含文件路径
-- `detailed`: 包含详细注释和元数据
-- `playlist`: M3U播放列表格式
-
-**网络路径配置示例**:
-```yaml
-strm:
-  enable: true
-  path_type: "network"
-  network_base_path: "\\\\nas-server\\movies"
-  use_windows_path: true
-```
-
-### 2. 分片文件处理
+### 1. 分片文件处理
 
 **功能**: 自动识别和处理多部分电影文件
 
@@ -376,15 +344,9 @@ strm:
 - 字母格式: `SSIS-001-A.mp4`, `SSIS-001-B.mp4`
 - Disc格式: `SSIS-001-disc1.mkv`, `SSIS-001-disc2.mkv`
 
-**处理模式**:
-```yaml
-strm:
-  multipart_mode: "separate"        # 为每个分片创建单独文件
-  # 或
-  multipart_mode: "combined"        # 创建单个包含所有分片的文件
-```
+**处理效果**: 同一分片组的所有文件会被刮削一次，并移动到同一输出目录，按 `番号-1`、`番号-2` 顺序命名。
 
-### 3. 图像处理功能
+### 2. 图像处理功能
 
 #### 人脸识别裁剪
 ```yaml
@@ -674,14 +636,7 @@ common:
    ```
 
 #### Jellyfin/Emby配置
-1. 启用STRM模式：
-   ```yaml
-   strm:
-     enable: true
-     content_mode: "detailed"
-   ```
-
-2. 使用软链接模式：
+1. 使用软链接模式：
    ```yaml
    common:
      link_mode: 1
@@ -693,8 +648,6 @@ common:
 ```yaml
 common:
   link_mode: 1                      # 软链接模式
-strm:
-  enable: true                      # 配合STRM文件
 ```
 
 **定期清理**:
@@ -756,15 +709,7 @@ common:
 3. 监控系统资源使用情况
 4. 使用调试模式跟踪处理进度
 
-### Q7: STRM文件在媒体中心中无法播放？
-
-**A**:
-1. 检查STRM文件中的路径是否正确
-2. 确认媒体中心能访问源文件位置
-3. 验证网络路径配置（如果使用网络存储）
-4. 测试STRM文件验证功能
-
-### Q8: 配置文件被重置了？
+### Q7: 配置文件被重置了？
 
 **A**:
 1. 备份自定义配置文件
@@ -818,7 +763,6 @@ common:
 - 📊 NFO文件生成
 - 🖼️ 图片下载和处理
 - 🌐 代理支持
-- 🔗 STRM文件生成功能
 
 ---
 

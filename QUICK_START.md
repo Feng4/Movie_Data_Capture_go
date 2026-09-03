@@ -57,8 +57,6 @@ proxy:
 common:
   main_mode: 1
   link_mode: 1                    # 软链接模式
-strm:
-  enable: true                    # 生成STRM文件
 ```
 
 ### 场景2：完整整理媒体库
@@ -118,7 +116,6 @@ common:
 ## 📚 进一步学习
 
 - 📖 [完整用户手册](USER_MANUAL.md)
-- 🔗 [STRM功能指南](docs/STRM_GUIDE.md)
 - 🐛 [问题反馈](https://github.com/Feng4/movie_data_capture_go/issues)
 
 ---

@@ -167,8 +167,6 @@ movie-data-capture/
     │   └── retry.go
     ├── storage/              # 存储管理
     │   └── storage.go
-    ├── strm/                 # STRM文件生成
-    │   └── strm.go
     ├── utils/                # 工具函数
     │   └── utils.go
     └── watermark/            # 水印处理
